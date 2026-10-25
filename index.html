@@ -518,14 +518,23 @@ async function loadContact(){
 }
 async function requestPhone(){
  const w=S.w;if(!w||S.contactBusy||!canSharePhone())return;
- const requestedAt=Date.now();S.contactBusy=true;S.contactError='';render(true);
+ S.contactBusy=true;S.contactError='';render(true);
  try{
-  const shared=await new Promise((resolve,reject)=>{const timer=setTimeout(()=>reject(Error('timeout')),45000);try{tg.requestContact(ok=>{clearTimeout(timer);resolve(ok)})}catch(e){clearTimeout(timer);reject(e)}});
-  if(!shared){if(S.w===w)S.phoneManual=true;return}
-  let phone='';
-  for(let i=0;i<10;i++){
-   const data=await fetchContact(),clockOffset=data.serverTime?data.serverTime-Date.now():0;if(validPhone(data.phone)&&data.updatedAt>=requestedAt+clockOffset-1500){phone=data.phone;break}
-   await new Promise(resolve=>setTimeout(resolve,600));
+  const result=await new Promise((resolve,reject)=>{const timer=setTimeout(()=>reject(Error('timeout')),45000);try{tg.requestContact((shared,event)=>{clearTimeout(timer);resolve({shared,event})})}catch(e){clearTimeout(timer);reject(e)}});
+  if(!result.shared){if(S.w===w)S.phoneManual=true;return}
+  // Current Telegram SDK provides contact data as the callback's second argument.
+  // This fills the same editable field as manual entry; it does not authenticate the user.
+  let contact=result.event?.responseUnsafe?.contact;
+  if(!contact&&typeof result.event?.response==='string'){
+   try{contact=JSON.parse(new URLSearchParams(result.event.response).get('contact'))}catch{}
+  }
+  const digits=String(contact?.phone_number||'').replace(/\D/g,'');
+  let phone=(!contact?.user_id||String(contact.user_id)===String(user?.id))&&validPhone('+'+digits)?'+'+digits:'';
+  // Older clients only return a boolean. Their contact arrives through the webhook.
+  // A previously saved number for this authenticated user is also valid.
+  for(let i=0;!phone&&i<15;i++){
+   try{const data=await fetchContact();if(validPhone(data.phone)){phone=data.phone;break}}catch{}
+   if(i<14)await new Promise(resolve=>setTimeout(resolve,600));
   }
   if(!phone)throw Error('pending');
   cachePhone(phone);if(S.w===w){w.phone=phone;S.phoneManual=false;delete S.errors.phone;storeDraft()}

@@ -146,3 +146,23 @@ test('server deletion is retained across subsequent status refresh',async()=>{
  c.context.record=remote;c.run("S.orders=[record];S.orderMenuId='local';S.tab='orders';S.sheet='order-confirm';S.orderConfirmAction='delete'");
  await c.run("organizeOrder('delete')");assert.equal(c.run('S.orders.length'),0);await c.run('syncOrders()');assert.equal(c.run('S.orders.length'),0);
 });
+
+test('Telegram native callback fills phone immediately without waiting for webhook',async()=>{
+ const c=client({live:true});let requests=0;
+ c.tg.requestContact=cb=>cb(true,{responseUnsafe:{contact:{user_id:42,phone_number:'375291234567'}}});
+ c.context.fetch=async()=>{requests++;throw Error('Webhook delayed')};
+ c.run("S.w=newW('trash');S.step=2;render()");
+ await c.run('requestPhone()');assert.equal(c.run('S.w.phone'),'+375291234567');assert.equal(requests,0);assert.equal(c.node('#go').disabled,false);
+});
+test('raw Telegram callback contact can fill number and confirmed saved phone is not rejected for age',async()=>{
+ const c=client({live:true});c.tg.requestContact=cb=>cb(true,{response:new URLSearchParams({contact:JSON.stringify({user_id:42,phone_number:'+375291234567'})}).toString()});
+ c.context.URLSearchParams=URLSearchParams;
+ c.run("S.w=newW('trash');S.step=2;render()");await c.run('requestPhone()');assert.equal(c.run('S.w.phone'),'+375291234567');
+ c.tg.requestContact=cb=>cb(true);c.context.fetch=async()=>Response.json({ok:true,phone:'+375331234567',updatedAt:1,serverTime:Date.now()});
+ await c.run('requestPhone()');assert.equal(c.run('S.w.phone'),'+375331234567');assert.equal(c.run('S.contactError'),'');
+});
+test('foreign callback contact is ignored; authenticated server contact is used instead',async()=>{
+ const c=client({live:true});c.tg.requestContact=cb=>cb(true,{responseUnsafe:{contact:{user_id:99,phone_number:'375291111111'}}});
+ c.context.fetch=async()=>Response.json({ok:true,phone:'+375291234567',updatedAt:1});
+ c.run("S.w=newW('trash');S.step=2;render()");await c.run('requestPhone()');assert.equal(c.run('S.w.phone'),'+375291234567');
+});
