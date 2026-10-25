@@ -96,8 +96,8 @@ textarea{width:100%;display:block;min-height:76px;padding:12px 0;border:0;backgr
 .done{text-align:center;padding:34px 0 18px}.ring{width:92px;height:92px;margin:0 auto 18px;border-radius:50%;background:#2fb86b;color:#fff;display:grid;place-items:center;animation:pop .55s cubic-bezier(.2,1.6,.4,1);box-shadow:0 0 0 14px rgba(47,184,107,.15)}.ring svg{width:46px;height:46px;stroke-width:2.6}
 @keyframes pop{from{transform:scale(.3);opacity:0}}
 .scrim{position:absolute;inset:0;background:rgba(5,10,16,.5);opacity:0;pointer-events:none;transition:opacity .25s;z-index:9}
-.sheet{position:absolute;left:0;right:0;bottom:0;max-height:90%;overflow-y:auto;background:var(--bg);border-radius:26px 26px 0 0;transform:translateY(102%);transition:transform .35s cubic-bezier(.2,.8,.2,1);z-index:10;padding:10px 16px calc(22px + env(safe-area-inset-bottom,0px))}
-.open .scrim{opacity:1;pointer-events:auto}.open .sheet{transform:none}
+.sheet{position:absolute;left:0;right:0;bottom:0;max-height:90%;overflow-y:auto;background:var(--bg);border-radius:26px 26px 0 0;transform:translate3d(0,calc(100% + 2px),0);transition:transform .32s cubic-bezier(.22,.72,.25,1);will-change:transform;pointer-events:none;overscroll-behavior:contain;z-index:10;padding:10px 16px calc(22px + env(safe-area-inset-bottom,0px))}
+.open .scrim{opacity:1;pointer-events:auto}.open .sheet{transform:translate3d(0,0,0);pointer-events:auto}
 .grab{width:38px;height:5px;border-radius:3px;background:var(--line);margin:0 auto 12px}.sheet h3{font-size:20px;margin-bottom:12px}
 .opt{display:flex;align-items:center;gap:12px;width:100%;padding:10px 12px;border-radius:16px;text-align:left;margin-bottom:6px;background:var(--card);border:2px solid transparent}
 .opt[aria-pressed=true]{border-color:var(--acc)}.opt div{flex:1}.opt small{display:block;color:var(--mut)}
@@ -178,7 +178,7 @@ body{background:var(--bg)}.app-toolbar{display:flex;align-items:center;justify-c
   <main id="view" tabindex="-1"></main>
   <div class="dock" id="dock" hidden><button id="go"></button></div>
   <nav class="tabs" id="tabs"></nav>
-  <div id="layer"><div class="scrim" data-a="close"></div><div class="sheet" id="sheet" role="dialog" aria-modal="true"></div></div>
+  <div id="layer"><div class="scrim" data-a="close"></div><div class="sheet" id="sheet" role="dialog" aria-modal="true" aria-hidden="true" inert></div></div>
 </div>
 <script>
 // iOS WebViews may ignore viewport zoom limits; block multi-touch zoom only.
@@ -303,9 +303,36 @@ function sheetHTML(){
  const cells=Array(off).fill('<span></span>').concat(Array.from({length:n},(_,i)=>{const d=iso(new Date(y,m,i+1));return `<button data-a="pickd" data-v="${d}" class="${d===today()?'now ':''}${d===w.date?'sel':''}" ${d<today()?'disabled':''} aria-label="${fd(d)}">${i+1}</button>`}));
  return `<div class="grab"></div><h3>Выберите дату</h3><div class="cal"><div class="cal-h"><button data-a="mo" data-v="-1" ${y===now.getFullYear()&&m===now.getMonth()?'disabled':''} aria-label="Прошлый месяц">${ic('back')}</button><b>${first.toLocaleDateString('ru-RU',{month:'long',year:'numeric'})}</b><button data-a="mo" data-v="1" aria-label="Следующий месяц">${ic('chev')}</button></div><div class="cal-g">${['Пн','Вт','Ср','Чт','Пт','Сб','Вс'].map(x=>`<span class="w">${x}</span>`).join('')}${cells.join('')}</div></div>`;
 }
-let sheetFocus=null;
-function openSheet(k){sheetFocus=document.activeElement;S.sheet=k;if(k==='cal'){const d=new Date((S.w.date||today())+'T12:00');S.cal={y:d.getFullYear(),m:d.getMonth()}}$('#sheet').innerHTML=sheetHTML()+'<button class="btn2" data-a="close">Закрыть</button>';$('#layer').className='open';$('#sheet').setAttribute('aria-label',k==='cal'?'Выбор даты':'Выбор услуги');$('#view').inert=true;$('#dock').inert=true;$('#tabs').inert=true;$('#sheet button, #sheet a')?.focus()}
-function close(){S.sheet=null;$('#layer').className='';$('#view').inert=false;$('#dock').inert=false;$('#tabs').inert=false;sheetFocus?.focus()}
+let sheetFocus=null,sheetFrame=null;
+function openSheet(k){
+ cancelAnimationFrame(sheetFrame);
+ sheetFocus=document.activeElement;
+ S.sheet=k;
+ if(k==='cal'){const d=new Date((S.w.date||today())+'T12:00');S.cal={y:d.getFullYear(),m:d.getMonth()}}
+ const sheet=$('#sheet'),layer=$('#layer');
+ layer.className='';
+ sheet.innerHTML=sheetHTML()+'<button class="btn2" data-a="close">Закрыть</button>';
+ sheet.setAttribute('aria-label',k==='cal'?'Выбор даты':'Выбор услуги');
+ sheet.setAttribute('aria-hidden','false');sheet.inert=false;sheet.scrollTop=0;
+ // Commit the off-screen position before starting the entrance transition.
+ sheet.getBoundingClientRect();
+ $('#view').inert=true;$('#dock').inert=true;$('#tabs').inert=true;
+ sheetFrame=requestAnimationFrame(()=>{
+  sheetFrame=null;if(S.sheet!==k)return;
+  layer.className='open';
+  const selected=sheet.querySelector('[aria-pressed="true"]')||sheet.querySelector('button:not(:disabled)');
+  selected?.focus({preventScroll:true});
+ });
+}
+function close(){
+ cancelAnimationFrame(sheetFrame);sheetFrame=null;
+ S.sheet=null;$('#layer').className='';
+ const sheet=$('#sheet');sheet.inert=true;sheet.setAttribute('aria-hidden','true');
+ $('#view').inert=false;$('#dock').inert=false;$('#tabs').inert=false;
+ if(sheetFocus?.isConnected)sheetFocus.focus({preventScroll:true});
+ else $('#view').focus({preventScroll:true});
+ sheetFocus=null;
+}
 function validate(){const w=S.w,e={};if(S.step===1){if(w.addr.trim().length<5)e.addr='Укажите улицу, дом и населённый пункт.';if(sv(w.sv).mv&&w.to.trim().length<5)e.to='Укажите адрес выгрузки.';if(w.date&&w.date<today())e.date='Выберите сегодняшнюю или будущую дату.'}if(S.step===2){const digits=w.phone.replace(/\D/g,'');if(!/^(?:375\d{9}|80\d{9})$/.test(digits))e.phone='Введите номер: +375 и 9 цифр, либо 8 0 и 9 цифр.'}return e}
 function refresh(){if(S.w)$('#go').textContent=S.step===2?'Получить расчёт':S.step===0?'Далее: адрес':'Далее: контакт'}
 function storeDraft(status='draft'){const w=S.w;if(!w)return null;const o={...w,id:w.id||String(Date.now()),status,step:S.step,updatedAt:new Date().toISOString()};const i=S.orders.findIndex(x=>x.id===o.id);if(i<0)S.orders.unshift(o);else S.orders[i]=o;S.w.id=o.id;save();return o}
