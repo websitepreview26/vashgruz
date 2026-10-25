@@ -1,3 +1,16 @@
+// Telegram media captions have a 1024-character limit. Keep every line represented;
+// the full original remains in D1 and is available via the manager's details button.
+export function compactCaption(text){
+ const lines=String(text).split('\n');
+ while(lines.join('\n').length>1024){
+  let i=0;for(let n=1;n<lines.length;n++)if(lines[n].length>lines[i].length)i=n;
+  const excess=lines.join('\n').length-1024;
+  const length=Math.max(32,lines[i].length-Math.min(excess,Math.max(1,Math.floor(lines[i].length/4))));
+  if(length>=lines[i].length)return lines.join('\n').slice(0,1023)+'…';
+  lines[i]=Array.from(lines[i].slice(0,length-1)).join('').replace(/[\uD800-\uDBFF]$/,'')+'…';
+ }
+ return lines.join('\n');
+}
 export const STATUS_LABELS={received:'Заявка получена',processing:'На оценке',quoted:'Предложение готово',discussion:'Уточняем условия',accepted:'Стоимость принята',cancelled:'Заявка закрыта',confirmed:'Согласовано ранее',completed:'Архив'};
 const terminal=new Set(['accepted','cancelled','confirmed','completed']);
 export const money=minor=>(minor/100).toLocaleString('ru-RU',{maximumFractionDigits:2})+' BYN';
@@ -10,10 +23,11 @@ export function parseQuote(text){
 }
 export function statusKeyboard(row,confirmCancel=false){
  const data=action=>`vg:${row.id}:${row.business_version||0}:${action}`;
- if(terminal.has(row.business_status))return {inline_keyboard:[]};
+ const details=row.message_kind&&row.message_kind!=='text'?[[{text:'Полная заявка',callback_data:data('details')}]]:[];
+ if(terminal.has(row.business_status))return {inline_keyboard:details};
  if(confirmCancel)return {inline_keyboard:[[{text:'Да, закрыть заявку',callback_data:data('cancelled')}],[{text:'Назад',callback_data:data('back')}]]};
  const buttons=row.business_status==='received'?[{text:'Взять на оценку',callback_data:data('processing')}]:[{text:row.business_status==='quoted'?'Изменить цену':'Назвать цену',callback_data:data('price')}];
- return {inline_keyboard:[buttons,[{text:'Закрыть заявку',callback_data:data('ask_cancel')}]]};
+ return {inline_keyboard:[buttons,[{text:'Закрыть заявку',callback_data:data('ask_cancel')}],...details]};
 }
 export function createStatusService({telegram,stmt,fail}){
   async function smallJson(request){
@@ -59,12 +73,19 @@ export function createStatusService({telegram,stmt,fail}){
   }
   function managerText(row,message){
    const w=JSON.parse(row.payload),base=row.manager_text||message?.text?.replace(/\n\nСтатус: [^\n]*$/,'')||[`Заявка на оценку ${row.id}`,w.desc||'Без описания',`Адрес: ${w.addr}`,w.to?`Куда: ${w.to}`:'',`Телефон: ${w.phone}`,`Клиент ID ${row.user_id}`].filter(Boolean).join('\n');
-   return base+'\n\nСтатус: '+STATUS_LABELS[row.business_status]+(row.quote_amount_minor?'\nПредложение: '+money(row.quote_amount_minor)+(row.quote_note?'\n'+row.quote_note:''):'')+(row.customer_note?'\nВопрос клиента: '+row.customer_note:'');
+   return base+'\n\nСтатус: '+STATUS_LABELS[row.business_status]+(row.quote_amount_minor?'\nПредложение: '+money(row.quote_amount_minor)+(row.quote_note?'\n'+row.quote_note.replace(/\s+/g,' '):''):'')+(row.customer_note?'\nВопрос клиента: '+row.customer_note.replace(/\s+/g,' '):'');
   }
   async function edit(env,row,message,confirmCancel=false){
    const form=new FormData();form.set('chat_id',env.TELEGRAM_CHAT_ID);form.set('message_id',String(row.message_id));form.set('reply_markup',JSON.stringify(statusKeyboard(row,confirmCancel)));
    if(confirmCancel||(!message?.text&&!row.manager_text))return telegram(env,'editMessageReplyMarkup',form);
+   if(row.message_kind&&row.message_kind!=='text'){form.set('caption',compactCaption(managerText(row,message)));return telegram(env,'editMessageCaption',form)}
    form.set('text',managerText(row,message));return telegram(env,'editMessageText',form);
+  }
+  async function ensureMediaButtons(env,row){
+   if(row.message_kind!=='album'||row.buttons_version)return;
+   const form=new FormData();form.set('chat_id',env.TELEGRAM_CHAT_ID);form.set('message_id',String(row.message_id));form.set('reply_markup',JSON.stringify(statusKeyboard(row)));
+   await telegram(env,'editMessageReplyMarkup',form);
+   await stmt(env,'UPDATE orders SET buttons_version=1 WHERE id=?',row.id).run();
   }
   async function reply(env,message,text){
    const f=new FormData();f.set('chat_id',env.TELEGRAM_CHAT_ID);f.set('text',text);f.set('reply_parameters',JSON.stringify({message_id:message.message_id}));
@@ -158,7 +179,7 @@ export function createStatusService({telegram,stmt,fail}){
     if(typeof q.id!=='string'||q.id.length>128)return {ok:true};
     const answer=async text=>{const f=new FormData();f.set('callback_query_id',q.id);f.set('text',text);try{await telegram(env,'answerCallbackQuery',f)}catch{}};
     if(String(q.message?.chat?.id)!==String(env.TELEGRAM_CHAT_ID)){await answer('Управление доступно только в группе заказов.');return {ok:true}}
-    const match=/^vg:(VG-[A-F0-9]{12}):(\d{1,8}):(processing|confirmed|completed|price|ask_cancel|cancelled|back)$/.exec(q.data||'');
+    const match=/^vg:(VG-[A-F0-9]{12}):(\d{1,8}):(processing|confirmed|completed|price|ask_cancel|cancelled|back|details)$/.exec(q.data||'');
     if(!match){await answer('Кнопка недоступна.');return {ok:true}}
     if(!Number.isSafeInteger(q.from?.id)){await answer('Не удалось проверить пользователя.');return {ok:true}}
     if(!await admin(env,q.from.id)){await answer('Изменять статус могут только администраторы группы.');return {ok:true}}
@@ -174,6 +195,7 @@ export function createStatusService({telegram,stmt,fail}){
       try{await edit(env,row,q.message)}catch{}
       await answer('Статус уже обновлён: '+STATUS_LABELS[row.business_status]);return {ok:true};
     }
+    if(action==='details'){await reply(env,q.message,managerText(row,q.message));await answer('');return {ok:true}}
     if(action==='price'){
      if(!['processing','discussion','quoted'].includes(row.business_status)){await answer('Сначала возьмите заявку на оценку.');return {ok:true}}
      const display=q.from.first_name||'Менеджер',f=new FormData();
@@ -222,5 +244,5 @@ export function createStatusService({telegram,stmt,fail}){
     const info=await setupTelegram('getWebhookInfo',new FormData());
     return {ok:true,webhook:info.url===url,pending:info.pending_update_count||0};
   }
-  return {received,list,contact,saveContact,decision,organize,webhook,setup};
+  return {ensureMediaButtons,received,list,contact,saveContact,decision,organize,webhook,setup};
 }

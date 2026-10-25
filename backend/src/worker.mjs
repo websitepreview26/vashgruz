@@ -1,4 +1,4 @@
-import {createStatusService,statusKeyboard} from './statuses.mjs';
+import {createStatusService,statusKeyboard,compactCaption} from './statuses.mjs';
 // HTTP/FormData + Telegram API. Only persistence and env bindings are Cloudflare-specific.
 const MAX_BODY = 12 * 1024 * 1024;
 const MAX_PHOTO = 2 * 1024 * 1024;
@@ -75,7 +75,7 @@ async function boundedForm(request){
 export function orderMessage(w,id,user,photoCount){
   const floor=(f,l)=>`${f} этаж, ${l?'есть лифт':'без лифта'}`;
   return [
-    `Заявка на оценку ${id}`,names[w.sv],w.desc||'Без описания',
+    `Заявка на оценку ${id}`,names[w.sv],w.desc.replace(/\s+/g,' ')||'Без описания',
     `Адрес: ${w.addr}`,floor(w.floor,w.lift),
     ...((w.sv==='flat'||w.sv==='office')?[`Куда: ${w.to}`,floor(w.toFloor,w.toLift)]:[]),
     ...(w.dis?['Нужна разборка']:[]),`Когда: ${w.date||'По согласованию'}${w.date?', '+slots[w.slot]:''}`,
@@ -103,20 +103,35 @@ const stmt=(env,sql,...args)=>env.DB.prepare(sql).bind(...args);
 const statusService=createStatusService({telegram,stmt,fail});
 const receipt=row=>({ok:true,id:row.id,photoCount:row.photo_count,businessStatus:row.business_status||'received',statusUpdatedAt:row.status_updated_at||row.updated_at});
 async function dispatch(env,row,w,user,photos){
-  if(row.state==='sent'){await statusService.received(env,row.id);return receipt(row)}
+  if(row.state==='sent'){await statusService.ensureMediaButtons(env,row);await statusService.received(env,row.id);return receipt(row)}
   if(['sending_text','sending_photos','uncertain'].includes(row.state))fail(409,'UNCERTAIN','Эта заявка уже отправляется или требует проверки доставки. Не создавайте её повторно.');
   let state=row.state,messageId=row.message_id;
   if(state==='received'){
     const lock=await stmt(env,"UPDATE orders SET state='sending_text', updated_at=? WHERE id=? AND state='received'",Date.now(),row.id).run();
     if(!lock.meta.changes)fail(409,'BUSY','Заявка уже отправляется. Подождите немного.');
-    const form=bodyFor(env);form.set('text',orderMessage(w,row.id,user,photos.length)+'\n\nСтатус: Получена');form.set('reply_markup',JSON.stringify(statusKeyboard(row)));form.set('protect_content','true');
+    const base=orderMessage(w,row.id,user,photos.length),kind=photos.length>1?'album':photos.length?'photo':'text';
+    const form=bodyFor(env);form.set('protect_content','true');
+    const caption=compactCaption(base+'\n\nСтатус: Получена');
+    if(kind==='text')form.set('text',base+'\n\nСтатус: Получена');
+    else if(kind==='photo'){form.set('photo',photos[0],'photo.jpg');form.set('caption',caption)}
+    else{
+      form.set('media',JSON.stringify(photos.map((file,i)=>{
+        form.set('photo'+i,file,`photo-${i+1}.jpg`);
+        return {type:'photo',media:'attach://photo'+i,...(i===0?{caption}:{})};
+      })));
+    }
+    if(kind!=='album')form.set('reply_markup',JSON.stringify(statusKeyboard({...row,message_kind:kind})));
     let result;
-    try{result=await telegram(env,'sendMessage',form)}
+    try{result=await telegram(env,kind==='text'?'sendMessage':kind==='photo'?'sendPhoto':'sendMediaGroup',form)}
     catch(e){await stmt(env,'UPDATE orders SET state=?,updated_at=? WHERE id=?',e.code==='DELIVERY'?'received':'uncertain',Date.now(),row.id).run();throw e}
-    messageId=result.message_id;
-    state=photos.length?'text_sent':'sent';
-    await stmt(env,'UPDATE orders SET state=?,message_id=?,updated_at=?,buttons_version=1,manager_text=? WHERE id=?',state,messageId,Date.now(),orderMessage(w,row.id,user,photos.length),row.id).run();
+    const messages=Array.isArray(result)?result:[result];
+    messageId=messages[0].message_id;state='sent';
+    const ids=messages.map(m=>m.photo?.at(-1)?.file_id).filter(Boolean);
+    await stmt(env,'UPDATE orders SET state=?,message_id=?,updated_at=?,buttons_version=?,manager_text=?,message_kind=?,photo_file_ids=? WHERE id=?',state,messageId,Date.now(),kind==='album'?0:1,base,kind,JSON.stringify(ids),row.id).run();
+    row=await stmt(env,'SELECT * FROM orders WHERE id=?',row.id).first();
+    await statusService.ensureMediaButtons(env,row);
   }
+  // Resume pre-upgrade deliveries whose separate text message already exists.
   if(state==='text_sent'){
     const lock=await stmt(env,"UPDATE orders SET state='sending_photos',updated_at=? WHERE id=? AND state='text_sent'",Date.now(),row.id).run();
     if(!lock.meta.changes)fail(409,'BUSY','Фотографии уже отправляются.');

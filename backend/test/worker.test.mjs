@@ -1,4 +1,4 @@
-import {parseQuote} from '../src/statuses.mjs';
+import {parseQuote,compactCaption} from '../src/statuses.mjs';
 import {test,afterEach} from 'node:test';
 import assert from 'node:assert/strict';
 import {DatabaseSync} from 'node:sqlite';
@@ -29,6 +29,7 @@ function env(){
   sqlite.exec(readFileSync(new URL('../migrations/0003_contacts.sql',import.meta.url),'utf8'));
   sqlite.exec(readFileSync(new URL('../migrations/0004_quotes.sql',import.meta.url),'utf8'));
   sqlite.exec(readFileSync(new URL('../migrations/0005_order_organization.sql',import.meta.url),'utf8'));
+  sqlite.exec(readFileSync(new URL('../migrations/0006_media_cards.sql',import.meta.url),'utf8'));
   return {MINI_APP_URL:'https://websitepreview26.github.io/vashgruz/',BOT_USERNAME:'vash_gruz_test_bot',BOT_TOKEN:TOKEN,TELEGRAM_CHAT_ID:'-100123456789',ALLOWED_ORIGIN:ORIGIN,DB:{
     prepare(sql){return {bind(...args){return {
       sql,args,
@@ -90,27 +91,47 @@ test('sends text once; same request returns same receipt; changed contents rejec
   assert.equal(calls.length,1);assert.equal(e.sqlite.prepare('SELECT state FROM orders').get().state,'sent');
   assert.match(calls[0].form.get('text'),/Минск, Ленина 1/);
 });
-test('single photo uses sendPhoto and replies to the order message',async()=>{
+test('single photo is the order card with caption and controls, without separate text',async()=>{
   const e=env(),calls=telegramMock();
   const r=await worker.fetch(await request({files:[photo()]}),e);assert.equal((await r.json()).ok,true);
-  assert.deepEqual(calls.map(c=>c.method),['sendMessage','sendPhoto']);
-  assert.equal(JSON.parse(calls[1].form.get('reply_parameters')).message_id,100);
-  assert.equal(e.sqlite.prepare('SELECT photo_file_ids FROM orders').get().photo_file_ids,'["stored-photo"]');
+  assert.deepEqual(calls.map(c=>c.method),['sendPhoto']);
+  assert.match(calls[0].form.get('caption'),/Минск, Ленина 1/);
+  assert.equal(calls[0].form.get('reply_parameters'),null);
+  assert.match(calls[0].form.get('reply_markup'),/Взять на оценку/);
+  const row=e.sqlite.prepare('SELECT * FROM orders').get();
+  assert.equal(row.photo_file_ids,'["stored-photo"]');assert.equal(row.message_kind,'photo');assert.equal(row.message_id,101);
 });
-test('multiple photos use an album linked to the order',async()=>{
-  const e=env(),calls=telegramMock();
-  const r=await worker.fetch(await request({files:[photo(),photo()]}),e);assert.equal((await r.json()).photoCount,2);
-  assert.deepEqual(calls.map(c=>c.method),['sendMessage','sendMediaGroup']);
-  assert.equal(JSON.parse(calls[1].form.get('media')).length,2);
+test('album carries the order caption and receives controls on its first photo',async()=>{
+  const e=env(),calls=telegramMock(),id=crypto.randomUUID();
+  const r=await worker.fetch(await request({id,files:[photo(),photo()]}),e);assert.equal((await r.json()).photoCount,2);
+  assert.deepEqual(calls.map(c=>c.method),['sendMediaGroup','editMessageReplyMarkup']);
+  const media=JSON.parse(calls[0].form.get('media'));assert.equal(media.length,2);
+  assert.match(media[0].caption,/Заявка на оценку/);assert.equal(media[1].caption,undefined);
+  assert.equal(calls[1].form.get('message_id'),'101');assert.match(calls[1].form.get('reply_markup'),/Полная заявка/);
+  assert.equal((await worker.fetch(await request({id,files:[photo(),photo()]}),e)).status,200);assert.equal(calls.length,2);
 });
-test('definitive photo failure retries only photos, never text',async()=>{
+test('definitive media rejection retries the combined card without creating text',async()=>{
   let reject=true;const e=env(),id=crypto.randomUUID(),calls=telegramMock(method=>{
     if(method==='sendPhoto'&&reject){reject=false;return Response.json({ok:false,error_code:400},{status:400})}
   });
   const a=await worker.fetch(await request({id,files:[photo()]}),e);assert.equal(a.status,502);
-  assert.equal(e.sqlite.prepare('SELECT state FROM orders').get().state,'text_sent');
+  assert.equal(e.sqlite.prepare('SELECT state FROM orders').get().state,'received');
   const b=await worker.fetch(await request({id,files:[photo()]}),e);assert.equal((await b.json()).ok,true);
-  assert.deepEqual(calls.map(c=>c.method),['sendMessage','sendPhoto','sendPhoto']);
+  assert.deepEqual(calls.map(c=>c.method),['sendPhoto','sendPhoto']);
+});
+test('album keyboard failure retries only editing, never uploads the album twice',async()=>{
+  let reject=true;const e=env(),id=crypto.randomUUID(),calls=telegramMock(method=>{
+    if(method==='editMessageReplyMarkup'&&reject){reject=false;throw Error('Connection lost')}
+  });
+  assert.equal((await worker.fetch(await request({id,files:[photo(),photo()]}),e)).status,409);
+  assert.equal(e.sqlite.prepare('SELECT state FROM orders').get().state,'sent');
+  assert.equal((await worker.fetch(await request({id,files:[photo(),photo()]}),e)).status,200);
+  assert.deepEqual(calls.map(c=>c.method),['sendMediaGroup','editMessageReplyMarkup','editMessageReplyMarkup']);
+});
+test('long captions fit Telegram limit and retain contact, addresses and latest status',()=>{
+ const text=['Заявка на оценку VG-123456789012','Описание: '+ '📦'.repeat(500),'Адрес: '+ 'А'.repeat(220),'Куда: '+'Б'.repeat(220),'Телефон: +375291234567','Статус: Предложение готово','Предложение: 150 BYN','Условия: '+'В'.repeat(600),'Вопрос клиента: '+'Г'.repeat(400)].join('\n');
+ const caption=compactCaption(text);assert(caption.length<=1024);assert.match(caption,/Телефон: \+375291234567/);assert.match(caption,/Статус: Предложение готово/);assert.match(caption,/Предложение: 150 BYN/);assert.match(caption,/Адрес:/);assert.match(caption,/Куда:/);assert.match(caption,/…/);
+ assert.equal(compactCaption('Короткая заявка'),'Короткая заявка');
 });
 test('lost Telegram response blocks automatic duplicates',async()=>{
   const e=env(),id=crypto.randomUUID(),calls=telegramMock(()=>{throw new Error('Network lost')});
@@ -290,4 +311,30 @@ test('customer cancellation is versioned, notifies manager once, and archives re
 });
 test('stale cancellation cannot silently cancel updated offer',async()=>{
  const {e,id}=await quoteFixture();const response=await worker.fetch(await organizeRequest(id,'cancel',0),e);assert.equal(response.status,409);assert.equal(e.sqlite.prepare('SELECT business_status FROM orders').get().business_status,'quoted');
+});
+
+test('manager changes media caption in place and can request full original description',async()=>{
+ const e=env();e.TELEGRAM_WEBHOOK_SECRET=WEBHOOK_SECRET;const calls=managerMock();
+ const data={...order(),desc:'Длинное описание '.repeat(50).trim()};
+ const created=await (await worker.fetch(await request({data,files:[photo()]}),e)).json();
+ await worker.fetch(callbackRequest(created.id,0,'processing',{message:101}),e);
+ const edit=calls.find(c=>c.method==='editMessageCaption');assert(edit);assert(edit.form.get('caption').length<=1024);assert.match(edit.form.get('caption'),/Статус: На оценке/);
+ assert.equal(calls.some(c=>c.method==='editMessageText'),false);
+ await worker.fetch(callbackRequest(created.id,1,'details',{message:101}),e);
+ const details=calls.filter(c=>c.method==='sendMessage').at(-1);assert(details);assert(details.form.get('text').includes(data.desc));
+ assert.equal(JSON.parse(details.form.get('reply_parameters')).message_id,101);
+});
+test('ambiguous media delivery is not uploaded again',async()=>{
+ const e=env(),id=crypto.randomUUID(),calls=telegramMock(()=>{throw Error('Response lost')});
+ assert.equal((await worker.fetch(await request({id,files:[photo()]}),e)).status,409);
+ assert.equal((await worker.fetch(await request({id,files:[photo()]}),e)).status,409);assert.equal(calls.length,1);
+});
+
+test('pre-upgrade partial delivery resumes photos linked to existing text card',async()=>{
+ const e=env(),id=crypto.randomUUID();telegramMock(()=>Response.json({ok:false,error_code:400},{status:400}));
+ await worker.fetch(await request({id,files:[photo()]}),e);
+ e.sqlite.prepare("UPDATE orders SET state='text_sent',message_id=100,message_kind='text'").run();
+ const calls=telegramMock();assert.equal((await worker.fetch(await request({id,files:[photo()]}),e)).status,200);
+ assert.deepEqual(calls.map(c=>c.method),['sendPhoto']);assert.equal(JSON.parse(calls[0].form.get('reply_parameters')).message_id,100);
+ assert.equal(e.sqlite.prepare('SELECT message_kind FROM orders').get().message_kind,'text');
 });

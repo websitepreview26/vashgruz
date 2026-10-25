@@ -1,0 +1,1 @@
+ALTER TABLE orders ADD COLUMN message_kind TEXT NOT NULL DEFAULT 'text';
