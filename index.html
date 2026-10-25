@@ -6,17 +6,17 @@
 <title>Ваш Груз</title>
 <script src="https://telegram.org/js/telegram-web-app.js"></script>
 <style>
-:root{--bg:#f1f3f6;--card:#fff;--ink:#0f1b2a;--mut:#6c7a89;--line:rgba(15,27,42,.09);--acc:#ffb800;--accx:#1a1400;--navy:#0f1b2a;--sh:0 1px 2px rgba(15,27,42,.05),0 10px 28px rgba(15,27,42,.07)}
+:root{--bg:#f3f4f6;--card:#fff;--ink:#0f1b2a;--mut:#6c7a89;--line:rgba(15,27,42,.09);--acc:#ffbf16;--accx:#1a1400;--navy:#0f1b2a;--sh:0 1px 2px rgba(15,27,42,.05),0 10px 28px rgba(15,27,42,.07)}
 [data-t=dark]{--bg:#0a1119;--card:#131d28;--ink:#eef3f8;--mut:#8796a7;--line:rgba(255,255,255,.08);--sh:0 10px 28px rgba(0,0,0,.4)}
 *{box-sizing:border-box;margin:0;-webkit-tap-highlight-color:transparent}
-html,body{height:100%;background:#c5cad1}
+html,body{height:100%;background:var(--bg)}
 body{font:16px/1.35 -apple-system,BlinkMacSystemFont,"SF Pro Text","Segoe UI",Roboto,sans-serif;color:var(--ink)}
 button{font:inherit;color:inherit;border:0;background:none;cursor:pointer}
 input,textarea{font:inherit;color:var(--ink)}
 svg{width:24px;height:24px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round;flex:none}
 #app{height:100dvh;max-width:430px;margin:0 auto;background:var(--bg);display:flex;flex-direction:column;position:relative;overflow:hidden}
 @media(min-width:520px){#app{height:min(860px,100dvh - 40px);margin:20px auto;border-radius:36px;box-shadow:0 30px 80px rgba(0,0,0,.3)}}
-.tg #app{border-radius:0;margin:0;height:100dvh}
+.tg #app{border-radius:0;margin:0;height:100dvh;max-width:none}
 #view{flex:1;overflow-y:auto;overscroll-behavior:contain;padding:calc(14px + env(safe-area-inset-top,0px)) 16px 24px}
 .af{animation:af .3s cubic-bezier(.2,.8,.2,1)}.ab{animation:ab .3s cubic-bezier(.2,.8,.2,1)}
 @keyframes af{from{transform:translateX(28px);opacity:0}}@keyframes ab{from{transform:translateX(-28px);opacity:0}}
@@ -124,8 +124,7 @@ button:focus-visible,a:focus-visible,summary:focus-visible{outline:none;box-shad
 .ticket .r b{overflow-wrap:anywhere;min-width:0}.ticket .r span{flex-shrink:0}.photo-link{justify-content:flex-start;padding:0 14px;font-size:14px}.privacy{text-decoration:underline}.hrow h1{font-size:32px}.dock button{font-size:16px}
 
 /* Application surfaces */
-:root{--sh:none;--bg:#f3f4f6;--acc:#ffbf16}
-body{background:#e4e7ec}.app-toolbar{display:flex;align-items:center;justify-content:space-between;height:54px;margin-bottom:20px}.app-brand{display:flex;align-items:center;gap:10px;font-size:19px;font-weight:750;letter-spacing:-.5px}.app-brand>span{width:35px;height:35px;display:grid;place-items:center;background:var(--acc);color:var(--accx);border-radius:11px}.app-city{font-size:12px;color:var(--mut);display:flex;align-items:center;gap:3px}.app-city svg{width:14px;height:14px}.hrow{margin:0 0 18px}.hrow h1{font-size:26px}.grid{gap:10px}.svc{min-height:119px;padding:15px;border-radius:18px;background:var(--card);border:1px solid var(--line);box-shadow:none}.svc .bg{display:none}.svc .ib{width:36px;height:36px;border-radius:11px;margin-bottom:12px}.svc .ib svg{width:21px;height:21px}.svc b{font-size:15px;letter-spacing:-.2px}.svc small{font-size:11px;margin-top:4px}.quick-row{display:flex;align-items:center;gap:12px;width:100%;background:var(--card);padding:14px;border-radius:17px;text-align:left;margin-top:12px;border:1px solid var(--line)}.quick-row>svg:first-child{color:var(--mut);width:22px}.quick-row>div{flex:1}.quick-row b{font-size:14px;font-weight:600;display:block}.quick-row small{font-size:12px;color:var(--mut);display:block;margin-top:3px}.quick-row>svg:last-child{width:17px;color:var(--mut)}.resume{background:var(--navy);color:white;border:0;margin:0 0 18px}.resume small{color:#a8b4c2}.resume>svg{color:var(--acc)!important}.sec{margin-top:20px}.sec b{font-size:16px}.card,.fld,.pill,.vol,.slot,.day,.ticket,.ord,.bar button{box-shadow:none}.card,.fld,.pill,.ticket,.ord{border:1px solid var(--line);border-radius:16px}.fld{height:54px}.bar{position:sticky;top:calc(-14px - env(safe-area-inset-top,0px));z-index:3;padding:10px 0;background:var(--bg);margin:0 0 7px;gap:16px}.bar .seg{gap:6px}.bar .seg i{height:3px}.bar button{width:34px;height:34px;background:transparent}.bar button svg{width:22px}.step-label{font-size:11px;margin-bottom:16px}.hd{margin-bottom:18px}.hd h1{font-size:26px}.sub{font-size:14px}.field-label{font-size:12px}.pill{padding:8px 12px}.pill b{font-size:13px}.pill em{font-size:12px}.task-input{min-height:130px;font-size:16px;line-height:1.6}.dock{padding-top:10px;padding-bottom:calc(10px + env(safe-area-inset-bottom,0px));background:var(--bg);backdrop-filter:none}.dock button{height:52px;border-radius:15px}.tabs{padding-top:10px;padding-bottom:calc(10px + env(safe-area-inset-bottom,0px));background:var(--card);backdrop-filter:none}.tabs button{gap:5px;font-size:10px}.tabs button svg{width:22px;height:22px}.tabs button[aria-current=true]{color:var(--ink)}.tabs button[aria-current=true] svg{color:var(--ink)}.sheet{border-radius:24px 24px 0 0}.ticket .r{font-size:13px;padding:11px 14px}.ticket .tot{border-top:1px solid var(--line);margin-top:0;background:var(--card)}.app-status{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--mut);margin-bottom:15px}.app-status i{width:7px;height:7px;border-radius:50%;background:var(--acc)}.contact-note{display:flex;align-items:center;gap:8px;color:var(--mut);font-size:12px;margin:16px 3px 0}.contact-note svg{width:15px;height:15px}.app-receipt-head{display:flex;align-items:center;justify-content:space-between;margin:12px 0 20px}.app-receipt-head h1{font-size:25px}.app-receipt-head button{color:var(--mut);font-size:13px}.order-foot{display:flex;align-items:center;justify-content:space-between;margin-top:13px}.order-foot .btn2{width:auto;padding:0 14px;height:38px;margin:0;font-size:13px}.order-foot .review-edit{font-size:12px}.conditions-title{font-size:12px}.rw{min-height:51px}.day{border-radius:14px}.slot{border-radius:14px;border:1px solid var(--line)}.slot[aria-pressed=true]{border:1px solid var(--acc);box-shadow:inset 0 0 0 1px var(--acc)}
+body{background:var(--bg)}.app-toolbar{display:flex;align-items:center;justify-content:space-between;height:54px;margin-bottom:20px}.app-brand{display:flex;align-items:center;gap:10px;font-size:19px;font-weight:750;letter-spacing:-.5px}.app-brand>span{width:35px;height:35px;display:grid;place-items:center;background:var(--acc);color:var(--accx);border-radius:11px}.app-city{font-size:12px;color:var(--mut);display:flex;align-items:center;gap:3px}.app-city svg{width:14px;height:14px}.hrow{margin:0 0 18px}.hrow h1{font-size:26px}.grid{gap:10px}.svc{min-height:119px;padding:15px;border-radius:18px;background:var(--card);border:1px solid var(--line);box-shadow:none}.svc .bg{display:none}.svc .ib{width:36px;height:36px;border-radius:11px;margin-bottom:12px}.svc .ib svg{width:21px;height:21px}.svc b{font-size:15px;letter-spacing:-.2px}.svc small{font-size:11px;margin-top:4px}.quick-row{display:flex;align-items:center;gap:12px;width:100%;background:var(--card);padding:14px;border-radius:17px;text-align:left;margin-top:12px;border:1px solid var(--line)}.quick-row>svg:first-child{color:var(--mut);width:22px}.quick-row>div{flex:1}.quick-row b{font-size:14px;font-weight:600;display:block}.quick-row small{font-size:12px;color:var(--mut);display:block;margin-top:3px}.quick-row>svg:last-child{width:17px;color:var(--mut)}.resume{background:var(--navy);color:white;border:0;margin:0 0 18px}.resume small{color:#a8b4c2}.resume>svg{color:var(--acc)!important}.sec{margin-top:20px}.sec b{font-size:16px}.card,.fld,.pill,.vol,.slot,.day,.ticket,.ord,.bar button{box-shadow:none}.card,.fld,.pill,.ticket,.ord{border:1px solid var(--line);border-radius:16px}.fld{height:54px}.bar{position:sticky;top:calc(-14px - env(safe-area-inset-top,0px));z-index:3;padding:10px 0;background:var(--bg);margin:0 0 7px;gap:16px}.bar .seg{gap:6px}.bar .seg i{height:3px}.bar button{width:34px;height:34px;background:transparent}.bar button svg{width:22px}.step-label{font-size:11px;margin-bottom:16px}.hd{margin-bottom:18px}.hd h1{font-size:26px}.sub{font-size:14px}.field-label{font-size:12px}.pill{padding:8px 12px}.pill b{font-size:13px}.pill em{font-size:12px}.task-input{min-height:130px;font-size:16px;line-height:1.6}.dock{padding-top:10px;padding-bottom:calc(10px + env(safe-area-inset-bottom,0px));background:var(--bg);backdrop-filter:none}.dock button{height:52px;border-radius:15px}.tabs{padding-top:10px;padding-bottom:calc(10px + env(safe-area-inset-bottom,0px));background:var(--card);backdrop-filter:none}.tabs button{gap:5px;font-size:10px}.tabs button svg{width:22px;height:22px}.tabs button[aria-current=true]{color:var(--ink)}.tabs button[aria-current=true] svg{color:var(--ink)}.sheet{border-radius:24px 24px 0 0}.ticket .r{font-size:13px;padding:11px 14px}.ticket .tot{border-top:1px solid var(--line);margin-top:0;background:var(--card)}.app-status{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--mut);margin-bottom:15px}.app-status i{width:7px;height:7px;border-radius:50%;background:var(--acc)}.contact-note{display:flex;align-items:center;gap:8px;color:var(--mut);font-size:12px;margin:16px 3px 0}.contact-note svg{width:15px;height:15px}.app-receipt-head{display:flex;align-items:center;justify-content:space-between;margin:12px 0 20px}.app-receipt-head h1{font-size:25px}.app-receipt-head button{color:var(--mut);font-size:13px}.order-foot{display:flex;align-items:center;justify-content:space-between;margin-top:13px}.order-foot .btn2{width:auto;padding:0 14px;height:38px;margin:0;font-size:13px}.order-foot .review-edit{font-size:12px}.conditions-title{font-size:12px}.rw{min-height:51px}.day{border-radius:14px}.slot{border-radius:14px;border:1px solid var(--line)}.slot[aria-pressed=true]{border:1px solid var(--acc);box-shadow:inset 0 0 0 1px var(--acc)}
 
 /* System safe area and Telegram's floating controls occupy separate regions. */
 :root{
@@ -151,6 +150,18 @@ body{background:#e4e7ec}.app-toolbar{display:flex;align-items:center;justify-con
 .photo-stub-icon{position:relative;display:grid;place-items:center;width:54px;height:54px;border-radius:13px;background:var(--bg)}
 .photo-stub-icon>svg:last-child{position:absolute;bottom:4px;right:4px;width:14px;height:14px;background:var(--card);border-radius:50%}
 .photo-stub b{display:block;font-size:14px;font-weight:500}.photo-stub small{display:block;font-size:12px;margin-top:4px}
+
+[data-t=light]{color-scheme:light}
+[data-t=dark]{color-scheme:dark}
+.tabs,.dock{flex-shrink:0}
+@media(max-height:740px){
+ .hrow h1{font-size:28px}
+ .home-section{margin-top:20px;margin-bottom:10px}
+ .svc{min-height:120px;padding:13px}
+ .svc .ib{width:38px;height:38px;border-radius:12px;margin-bottom:12px}
+ .svc .ib svg{width:22px;height:22px}
+ .svc small{font-size:13px}
+}
 </style>
 </head>
 <body>
@@ -162,10 +173,24 @@ body{background:#e4e7ec}.app-toolbar{display:flex;align-items:center;justify-con
 </div>
 <script>
 const tg = window.Telegram && window.Telegram.WebApp, inTg = !!(tg && (tg.initData || (tg.platform && tg.platform !== 'unknown')));
-const dark = tg ? tg.colorScheme === 'dark' : matchMedia('(prefers-color-scheme: dark)').matches;
-document.documentElement.dataset.t = dark ? 'dark' : 'light';
-if (inTg) document.documentElement.classList.add('tg');
-if (inTg) { tg.ready(); tg.expand(); try { tg.disableVerticalSwipes(); tg.setHeaderColor(dark ? '#0a1119' : '#f1f3f6'); tg.setBackgroundColor(dark ? '#0a1119' : '#f1f3f6'); tg.MainButton.hide(); } catch(e){} }
+const systemTheme=matchMedia('(prefers-color-scheme: dark)');
+function syncTheme(){
+ const dark=inTg?tg.colorScheme==='dark':systemTheme.matches;
+ document.documentElement.dataset.t=dark?'dark':'light';
+ if(inTg){
+  const bg=dark?'#0a1119':'#f3f4f6';
+  try{tg.setHeaderColor(bg)}catch(e){}
+  try{tg.setBackgroundColor(bg)}catch(e){}
+  try{tg.setBottomBarColor(dark?'#131d28':'#ffffff')}catch(e){}
+ }
+}
+if(inTg){
+ document.documentElement.classList.add('tg');
+ tg.ready();tg.expand();
+ try{tg.disableVerticalSwipes();tg.MainButton.hide()}catch(e){}
+ tg.onEvent('themeChanged',syncTheme);
+}else if(systemTheme.addEventListener){systemTheme.addEventListener('change',syncTheme)}
+syncTheme();
 // Keep fallback insets current on clients that expose the JS API before CSS variables.
 function syncSafeArea(){
  if(!inTg)return;
