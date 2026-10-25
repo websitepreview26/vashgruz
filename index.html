@@ -162,6 +162,14 @@ body{background:var(--bg)}.app-toolbar{display:flex;align-items:center;justify-c
  .svc .ib svg{width:22px;height:22px}
  .svc small{font-size:13px}
 }
+
+.edge-stage{position:absolute;top:calc(var(--app-safe-top) + var(--app-content-top));right:var(--app-safe-right);bottom:0;left:var(--app-safe-left);z-index:8;overflow:hidden;pointer-events:none;background:var(--bg)}
+.edge-page{position:absolute;inset:0;display:flex;flex-direction:column;background:var(--bg);will-change:transform;animation:none!important}
+.edge-page>main{flex:1;min-height:0;overflow:hidden;padding:14px 16px 24px;background:var(--bg);animation:none!important}
+.edge-page.front{box-shadow:-8px 0 24px rgba(0,0,0,.17)}
+.edge-shade{position:absolute;inset:0;background:#000;opacity:.18;pointer-events:none}
+.edge-page input,.edge-page textarea{caret-color:transparent}
+#app.edge-dragging>#view,#app.edge-dragging>#dock,#app.edge-dragging>#tabs{visibility:hidden}
 </style>
 </head>
 <body>
@@ -253,7 +261,7 @@ function save(){try{localStorage.setItem('vg-requests-v2',JSON.stringify(S.order
 const TABS = [['home','Заказ','truck'],['orders','Заявки','list']];
 $('#tabs').innerHTML = TABS.map(t => `<button data-a="tab" data-v="${t[0]}">${ic(t[2])}${t[1]}</button>`).join('');
 if (inTg) tg.BackButton.onClick(back);
-function back(){hap();if(S.sheet)return close();S.errors={};S.anim='ab';if(S.w&&S.step>0)S.step--;else{if(S.w&&(S.w.desc.trim()||S.w.addr.trim()))storeDraft();S.w=null;S.tab='home'}render()}
+function back(animated=true){hap();if(S.sheet)return close();S.errors={};S.anim=animated===false?'':'ab';if(S.w&&S.step>0)S.step--;else{if(S.w&&(S.w.desc.trim()||S.w.addr.trim()))storeDraft();const wasDone=S.tab==='done';S.w=null;S.tab=wasDone?'orders':'home'}render()}
 function home(){
  const draft=S.orders.find(o=>o.status==='draft');
  return `<div class="hrow"><h1>Что нужно вывезти<br>или перевезти?</h1></div>
@@ -301,7 +309,7 @@ function validate(){const w=S.w,e={};if(S.step===0&&!w.desc.trim())e.desc='На�
 function refresh(){if(S.w)$('#go').textContent=S.step===2?'Получить расчёт':S.step===0?'Далее: адрес':'Далее: контакт'}
 function storeDraft(status='draft'){const w=S.w;if(!w)return null;const o={...w,id:w.id||String(Date.now()),status,step:S.step,updatedAt:new Date().toISOString()};const i=S.orders.findIndex(x=>x.id===o.id);if(i<0)S.orders.unshift(o);else S.orders[i]=o;S.w.id=o.id;save();return o}
 $('#go').onclick=()=>{if(!S.w){if(S.tab==='done'){S.tab='orders';render()}return;}S.errors=validate();if(Object.keys(S.errors).length){render();const first=Object.keys(S.errors)[0];$('#'+first)?.focus();return}hap();if(S.step<2){storeDraft();S.step++;S.anim='af';return render()}const o=storeDraft('demo');S.last=o;S.w=null;S.tab='done';S.anim='af';render()};
-function render(){const wiz=!!S.w,v=$('#view');v.className=S.anim;S.anim='';v.innerHTML=wiz?wizard():({home,orders,done}[S.tab]||home)();v.scrollTop=0;$('#dock').hidden=!wiz&&S.tab!=='done';$('#tabs').hidden=wiz||S.tab==='done';if(!wiz&&S.tab==='done')$('#go').textContent='Мои заявки';document.querySelectorAll('#tabs button').forEach(b=>b.setAttribute('aria-current',b.dataset.v===S.tab));if(inTg)(wiz||S.tab==='done')?tg.BackButton.show():tg.BackButton.hide();if(wiz)refresh()}
+function render(){edgeBack.cancel();const wiz=!!S.w,v=$('#view');v.className=S.anim;S.anim='';v.innerHTML=wiz?wizard():({home,orders,done}[S.tab]||home)();v.scrollTop=0;$('#dock').hidden=!wiz&&S.tab!=='done';$('#tabs').hidden=wiz||S.tab==='done';if(!wiz&&S.tab==='done')$('#go').textContent='Мои заявки';document.querySelectorAll('#tabs button').forEach(b=>b.setAttribute('aria-current',b.dataset.v===S.tab));if(inTg)(wiz||S.tab==='done')?tg.BackButton.show():tg.BackButton.hide();if(wiz)refresh()}
 const keep=fn=>{const y=$('#view').scrollTop;fn();render();$('#view').scrollTop=y};
 document.addEventListener('click',e=>{const b=e.target.closest('[data-a]');if(!b)return;const a=b.dataset.a,v=b.dataset.v,k=b.dataset.k,w=S.w;hap();
  if(a==='tab'){S.tab=v;S.anim='af';return render()}
@@ -319,6 +327,97 @@ document.addEventListener('click',e=>{const b=e.target.closest('[data-a]');if(!b
  if(a==='pickd'){w.date=v;close();return keep(()=>{})}
  keep(()=>{if(a==='slot')w.slot=+v;if(a==='tgl')w[k]=!w[k];if(a==='fl')w[k]=Math.min(50,Math.max(1,w[k] + +v));if(a==='day'){w.date=v;if(!v)w.slot=0}})
 });
+// Render the previous screen without changing the live form or its data.
+function backPreview(){
+ const current=S;
+ try{
+  S={...current,w:current.w?{...current.w}:null,errors:{},anim:''};
+  if(S.w&&S.step>0)S.step--;
+  else{S.w=null;S.tab=current.tab==='done'?'orders':'home'}
+  return {html:S.w?wizard():S.tab==='orders'?orders():home(),wizard:!!S.w,step:S.step,tab:S.tab};
+ }finally{S=current}
+}
+function commitEdgeBack(distance,width){return distance>=width*.35}
+const edgeBack=(()=>{
+ const app=$('#app');
+ let drag=null,stage=null,front=null,rear=null,shade=null,timer=null,suppressUntil=0;
+ const stripIds=el=>{el.removeAttribute('id');el.querySelectorAll('[id]').forEach(n=>{if(inTg&&n.id==='bk')n.hidden=true;n.removeAttribute('id')});return el};
+ function cancel(){
+  clearTimeout(timer);timer=null;
+  if(stage)stage.remove();
+  app.classList.remove('edge-dragging');
+  drag=stage=front=rear=shade=null;
+ }
+ function frame(main,footer){
+  const page=document.createElement('div');page.className='edge-page';page.inert=true;
+  page.append(main,footer);return page;
+ }
+ function prepare(){
+  const preview=backPreview(),view=$('#view');
+  const previous=document.createElement('main');previous.innerHTML=preview.html;stripIds(previous);
+  const footer=stripIds($(preview.wizard?'#dock':'#tabs').cloneNode(true));footer.hidden=false;
+  if(preview.wizard)footer.querySelector('button').textContent=preview.step===0?'Далее: адрес':'Далее: контакт';
+  else footer.querySelectorAll('button').forEach(b=>b.setAttribute('aria-current',b.dataset.v===preview.tab));
+  rear=frame(previous,footer);
+  const visible=stripIds(view.cloneNode(true));
+  front=frame(visible,stripIds($(S.w||S.tab==='done'?'#dock':'#tabs').cloneNode(true)));
+  front.classList.add('front');
+  shade=document.createElement('div');shade.className='edge-shade';rear.append(shade);
+  stage=document.createElement('div');stage.className='edge-stage';stage.setAttribute('aria-hidden','true');stage.append(rear,front);app.append(stage);
+  visible.scrollTop=view.scrollTop;
+  app.classList.add('edge-dragging');move(0);
+ }
+ function move(x){
+  const progress=x/drag.width;
+  front.style.transform=`translate3d(${x}px,0,0)`;
+  rear.style.transform=`translate3d(${(x-drag.width)*.24}px,0,0)`;
+  shade.style.opacity=String(.18*(1-progress));
+ }
+ function finish(commit){
+  if(!stage){cancel();return}
+  drag.settling=true;suppressUntil=performance.now()+450;
+  const reduce=matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const duration=reduce?0:220;
+  front.style.transition=rear.style.transition=`transform ${duration}ms cubic-bezier(.2,.75,.25,1)`;
+  shade.style.transition=`opacity ${duration}ms ease`;
+  move(commit?drag.width:0);
+  timer=setTimeout(()=>{cancel();if(commit)back(false)},duration);
+ }
+ app.addEventListener('touchstart',e=>{
+  if(drag||S.sheet||(!S.w&&S.tab!=='done')||e.touches.length!==1)return;
+  const t=e.touches[0],bounds=app.getBoundingClientRect();
+  if(t.clientX<bounds.left||t.clientX>bounds.left+28||t.clientY<bounds.top||t.clientY>bounds.bottom)return;
+  if(e.target.closest('input,textarea,select,.days'))return;
+  drag={id:t.identifier,x:t.clientX,y:t.clientY,width:bounds.width,distance:0,active:false,settling:false};
+ },{passive:true});
+ app.addEventListener('touchmove',e=>{
+  if(!drag||drag.settling)return;
+  if(e.touches.length!==1){cancel();return}
+  const t=[...e.touches].find(t=>t.identifier===drag.id);if(!t)return;
+  const dx=t.clientX-drag.x,dy=t.clientY-drag.y;
+  if(!drag.active){
+   if(Math.abs(dy)>8&&Math.abs(dy)>=Math.abs(dx)){cancel();return}
+   if(dx< -8){cancel();return}
+   if(dx<8||dx<Math.abs(dy)*1.2)return;
+   if(!e.cancelable){cancel();return}
+   drag.active=true;prepare();
+  }
+  if(e.cancelable)e.preventDefault();
+  drag.distance=Math.max(0,Math.min(drag.width,dx));move(drag.distance);
+ },{passive:false});
+ app.addEventListener('touchend',e=>{
+  if(!drag||drag.settling)return;
+  if(![...e.changedTouches].some(t=>t.identifier===drag.id))return;
+  if(!drag.active){cancel();return}
+  if(e.cancelable)e.preventDefault();
+  finish(commitEdgeBack(drag.distance,drag.width));
+ },{passive:false});
+ app.addEventListener('touchcancel',()=>{if(drag?.active&&!drag.settling)finish(false);else cancel()},{passive:true});
+ app.addEventListener('click',e=>{if(performance.now()<suppressUntil){e.preventDefault();e.stopImmediatePropagation()}},true);
+ window.addEventListener('resize',cancel);
+ document.addEventListener('visibilitychange',()=>{if(document.hidden)cancel()});
+ return {cancel};
+})();
 document.addEventListener('input',e=>{const f=e.target.dataset.f;if(f&&S.w){S.w[f]=e.target.value;if(S.errors[f]){delete S.errors[f];$('#err-'+f).textContent='';e.target.setAttribute('aria-invalid','false');e.target.closest('.fld')?.classList.remove('invalid')}refresh()}});
 document.addEventListener('keydown',e=>{if(!S.sheet)return;if(e.key==='Escape')return close();if(e.key==='Tab'){const items=[...document.querySelectorAll('#sheet button:not(:disabled), #sheet a')];const first=items[0],last=items[items.length-1];if(e.shiftKey&&document.activeElement===first){e.preventDefault();last.focus()}else if(!e.shiftKey&&document.activeElement===last){e.preventDefault();first.focus()}}});
 render();
