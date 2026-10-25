@@ -132,7 +132,7 @@ test('a changed quote is refreshed and never accepted automatically',async()=>{
 });
 
 test('active and archive tabs filter rows and show only first batch',()=>{
- const c=client();c.run("S.orders=Array.from({length:12},(_,i)=>({id:'sent-'+i,serverId:'VG-'+i,sv:'trash',status:'sent',date:'',desc:'Задача '+i,customerVisibility:i===11?'archived':'active'}));S.tab='orders';render()");
+ const c=client();c.run("S.orders=Array.from({length:12},(_,i)=>({id:'sent-'+i,serverId:'VG-'+i,sv:'trash',status:'sent',date:'',desc:'Задача '+i,businessStatus:i===11?'cancelled':'received',customerVisibility:i===11?'archived':'active'}));S.tab='orders';render()");
  assert.equal((c.node('#view').innerHTML.match(/<article class="ord">/g)||[]).length,8);assert.match(c.node('#view').innerHTML,/Показать ещё \(3\)/);
  c.run("S.listTab='archive';render()");assert.equal((c.node('#view').innerHTML.match(/<article class="ord">/g)||[]).length,1);assert.match(c.node('#view').innerHTML,/Задача 11/);
 });
@@ -188,8 +188,21 @@ test('existing drafts consolidate at startup, keeping newest filled form and eve
  const home=c.run('home()');assert.match(home,/Продолжить заполнение/);assert.match(home,/data-a="draft-delete"/);assert(!home.includes('№'));
  assert.equal(JSON.parse(c.storage.get('vg-requests-v2')).length,2);
 });
-test('drafts never enter list counts or archive, including before a status refresh',()=>{
+test('drafts cannot trigger history or list tabs; an empty history selection returns to current',()=>{
  const c=client();c.run("S.orders=[{id:'draft',status:'draft',sv:'trash',desc:'Незакончено',customerVisibility:'archived'},{id:'sent',status:'sent',serverId:'VG-SENT',sv:'trash',date:'',desc:'На оценке'}];S.tab='orders';render()");
- assert.equal(c.run('visibleOrders().length'),1);assert.match(c.node('#view').innerHTML,/Активные <span>1/);assert.match(c.node('#view').innerHTML,/Архив <span>0/);
- c.run("S.listTab='archive';render()");assert.equal(c.run('visibleOrders().length'),0);assert.match(c.node('#view').innerHTML,/Архив пуст/);
+ assert.equal(c.run('visibleOrders().length'),1);assert(!c.node('#view').innerHTML.includes('order-folders'));
+ c.run("S.listTab='archive';render()");assert.equal(c.run('S.listTab'),'active');assert.equal(c.run('visibleOrders().length'),1);
+});
+test('only closed statuses create history; accepted offers and old manually archived leads stay current',()=>{
+ const c=client();c.run("S.orders=[{id:'accepted',serverId:'VG-A',status:'sent',sv:'trash',date:'',businessStatus:'accepted',customerVisibility:'archived'},{id:'processing',serverId:'VG-P',status:'sent',sv:'trash',date:'',businessStatus:'processing',customerVisibility:'archived'}];S.tab='orders';render()");
+ assert.equal(c.run('visibleOrders().length'),2);assert(!c.node('#view').innerHTML.includes('order-folders'));
+ c.run("S.orders.push({id:'closed',serverId:'VG-C',status:'sent',sv:'trash',date:'',businessStatus:'cancelled',customerVisibility:'active'});render()");
+ assert.match(c.node('#view').innerHTML,/Текущие <span>2/);assert.match(c.node('#view').innerHTML,/История <span>1/);
+ c.run("S.listTab='archive';render()");assert.equal(c.run('visibleOrders()[0].id'),'closed');
+ c.run("S.orders=S.orders.filter(o=>o.id!=='closed');render()");assert.equal(c.run('S.listTab'),'active');assert(!c.node('#view').innerHTML.includes('order-folders'));
+});
+test('order menu contains deletion and current assessment cancellation without repeat or archive actions',()=>{
+ const c=client();c.run("S.orders=[{id:'lead',serverId:'VG-LEAD',status:'sent',sv:'trash',businessStatus:'processing'}];S.orderMenuId='lead';S.sheet='order-actions'");
+ let menu=c.run('orderActionsSheet()');assert.match(menu,/Удалить из списка/);assert.match(menu,/Отменить оценку/);assert(!menu.includes('data-a="again"'));assert(!menu.includes('data-v="archive"'));assert(!menu.includes('data-v="restore"'));
+ c.run("S.orders[0].businessStatus='cancelled'");menu=c.run('orderActionsSheet()');assert.match(menu,/Удалить из списка/);assert(!menu.includes('Отменить оценку'));
 });
