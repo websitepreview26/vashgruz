@@ -28,6 +28,7 @@ function env(){
   sqlite.exec(readFileSync(new URL('../migrations/0002_statuses.sql',import.meta.url),'utf8'));
   sqlite.exec(readFileSync(new URL('../migrations/0003_contacts.sql',import.meta.url),'utf8'));
   sqlite.exec(readFileSync(new URL('../migrations/0004_quotes.sql',import.meta.url),'utf8'));
+  sqlite.exec(readFileSync(new URL('../migrations/0005_order_organization.sql',import.meta.url),'utf8'));
   return {MINI_APP_URL:'https://websitepreview26.github.io/vashgruz/',BOT_USERNAME:'vash_gruz_test_bot',BOT_TOKEN:TOKEN,TELEGRAM_CHAT_ID:'-100123456789',ALLOWED_ORIGIN:ORIGIN,DB:{
     prepare(sql){return {bind(...args){return {
       sql,args,
@@ -264,4 +265,29 @@ test('backfill treats already identical Telegram message as success',async()=>{
  telegramMock(method=>method.startsWith('editMessage')?Response.json({ok:false,error_code:400,description:'Bad Request: message is not modified'},{status:400}):undefined);
  const r=await worker.fetch(new Request('https://api.example/internal/telegram/setup',{method:'POST',headers:{authorization:'Bearer '+WEBHOOK_SECRET},body:JSON.stringify({action:'backfill'})}),e);
  const result=await r.json();assert.equal(result.changed,1);assert.equal(result.failed,0);assert.equal(result.remaining,0);
+});
+
+async function organizeRequest(id,action,version=0,init){return new Request('https://api.example/api/orders/organize',{method:'POST',headers:{origin:ORIGIN,'content-type':'application/json'},body:JSON.stringify({initData:init||await auth(),id,action,version})})}
+test('archive and restore are owner-specific and do not change assessment status',async()=>{
+ const e=env(),calls=managerMock();const {id}=await (await worker.fetch(await request(),e)).json();const before=calls.length;
+ const archived=await worker.fetch(await organizeRequest(id,'archive'),e);assert.equal((await archived.json()).order.customerVisibility,'archived');
+ let list=await (await worker.fetch(await listRequest(),e)).json();assert.equal(list.orders[0].customerVisibility,'archived');assert.equal(list.orders[0].businessStatus,'received');assert.equal(calls.length,before);
+ const other=await auth({user:JSON.stringify({id:99})});assert.equal((await worker.fetch(await organizeRequest(id,'delete',0,other),e)).status,404);
+ assert.equal((await (await worker.fetch(await organizeRequest(id,'restore'),e)).json()).order.customerVisibility,'active');
+});
+test('deleted records stay out of customer list, remain with manager, and can be undone',async()=>{
+ const e={...env(),TELEGRAM_WEBHOOK_SECRET:WEBHOOK_SECRET};managerMock();const {id}=await (await worker.fetch(await request(),e)).json();
+ await worker.fetch(await organizeRequest(id,'delete'),e);assert.equal((await (await worker.fetch(await listRequest(),e)).json()).orders.length,0);assert.equal(e.sqlite.prepare('SELECT COUNT(*) n FROM orders').get().n,1);
+ await worker.fetch(callbackRequest(id,0,'cancelled'),e);assert.equal(e.sqlite.prepare('SELECT customer_visibility FROM orders').get().customer_visibility,'deleted');
+ assert.equal((await (await worker.fetch(await listRequest(),e)).json()).orders.length,0);
+ await worker.fetch(await organizeRequest(id,'restore'),e);assert.equal((await (await worker.fetch(await listRequest(),e)).json()).orders.length,1);
+});
+test('customer cancellation is versioned, notifies manager once, and archives request',async()=>{
+ const e={...env(),TELEGRAM_WEBHOOK_SECRET:WEBHOOK_SECRET},calls=managerMock();const {id}=await (await worker.fetch(await request(),e)).json();
+ const response=await worker.fetch(await organizeRequest(id,'cancel'),e);const row=(await response.json()).order;
+ assert.equal(row.businessStatus,'cancelled');assert.equal(row.customerVisibility,'archived');const n=calls.length;
+ assert.equal((await worker.fetch(await organizeRequest(id,'cancel'),e)).status,200);assert.equal(calls.length,n);
+});
+test('stale cancellation cannot silently cancel updated offer',async()=>{
+ const {e,id}=await quoteFixture();const response=await worker.fetch(await organizeRequest(id,'cancel',0),e);assert.equal(response.status,409);assert.equal(e.sqlite.prepare('SELECT business_status FROM orders').get().business_status,'quoted');
 });

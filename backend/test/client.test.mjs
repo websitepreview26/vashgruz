@@ -8,7 +8,7 @@ const script=html.slice(html.indexOf('<script>')+8,html.indexOf('</script>',html
 class Element {
   constructor(){this.innerHTML='';this.textContent='';this.style={};this.listeners={};this.scrollTop=0;this.classList={add(){},remove(){}};}
   addEventListener(key,fn){this.listeners[key]=fn}
-  focus(){}setAttribute(){}contains(){return false}
+  focus(){}setAttribute(){}contains(){return false}querySelector(){return new Element()}
 }
 function client({live=false,fetcher}={}){
   const nodes=new Map(),storage=new Map(),urls=new Set();let counter=0;
@@ -19,7 +19,7 @@ function client({live=false,fetcher}={}){
     return new Element();
   }};
   class FakeImage{naturalWidth=3000;naturalHeight=2000;set src(v){this.onload()}}
-  const context={window:{VG_CONFIG:{apiBase:live?'https://api.example':''},...(live?{Telegram:{WebApp:tg}}:{}),addEventListener(){}},document:doc,matchMedia:()=>({matches:false}),localStorage:{getItem:k=>storage.get(k)||null,setItem:(k,v)=>storage.set(k,v)},crypto,FormData,Blob,File,FileReader:class{readAsDataURL(){this.result='data:image/jpeg;base64,original';this.onload()}},Image:FakeImage,AbortSignal,Date,setTimeout,clearTimeout,performance,fetch:(url,opts)=>url.endsWith('/api/contact')?Promise.resolve(Response.json({ok:true,phone:''})):fetcher(url,opts),URL:{createObjectURL(){const u='blob:test-'+(++counter);urls.add(u);return u},revokeObjectURL:u=>urls.delete(u)}};
+  const context={window:{VG_CONFIG:{apiBase:live?'https://api.example':''},...(live?{Telegram:{WebApp:tg}}:{}),addEventListener(){}},document:doc,matchMedia:()=>({matches:false}),localStorage:{getItem:k=>storage.get(k)||null,setItem:(k,v)=>storage.set(k,v)},crypto,FormData,Blob,File,FileReader:class{readAsDataURL(){this.result='data:image/jpeg;base64,original';this.onload()}},Image:FakeImage,AbortSignal,Date,setTimeout,clearTimeout,requestAnimationFrame:()=>0,cancelAnimationFrame(){},performance,fetch:(url,opts)=>url.endsWith('/api/contact')?Promise.resolve(Response.json({ok:true,phone:''})):fetcher(url,opts),URL:{createObjectURL(){const u='blob:test-'+(++counter);urls.add(u);return u},revokeObjectURL:u=>urls.delete(u)}};
   vm.createContext(context);vm.runInContext(script,context);
   return {run:s=>vm.runInContext(s,context),node,storage,context,urls,tg};
 }
@@ -128,4 +128,21 @@ test('a changed quote is refreshed and never accepted automatically',async()=>{
  let decisions=0;const c=client({live:true,fetcher:async(url)=>url.endsWith('/decision')?(decisions++,Response.json({ok:false,code:'QUOTE_CHANGED',message:'Предложение изменилось.'},{status:409})):Response.json({ok:true,orders:[{...proposal,statusVersion:3,quote:{amountMinor:18000,note:'Уточнён объём',revision:2}}]})});
  c.context.proposal=proposal;c.run("S.orders=[proposal];S.last=proposal;S.tab='done';render()");await c.run("decideQuote('accept')");
  assert.equal(decisions,1);assert.equal(c.run('S.last.businessStatus'),'quoted');assert.equal(c.run('S.last.quote.amountMinor'),18000);assert.equal(c.run('S.last.statusVersion'),3);
+});
+
+test('active and archive tabs filter rows and show only first batch',()=>{
+ const c=client();c.run("S.orders=Array.from({length:12},(_,i)=>({id:'draft-'+i,sv:'trash',status:'draft',date:'',desc:'Задача '+i,customerVisibility:i===11?'archived':'active'}));S.tab='orders';render()");
+ assert.equal((c.node('#view').innerHTML.match(/<article class="ord">/g)||[]).length,8);assert.match(c.node('#view').innerHTML,/Показать ещё \(3\)/);
+ c.run("S.listTab='archive';render()");assert.equal((c.node('#view').innerHTML.match(/<article class="ord">/g)||[]).length,1);assert.match(c.node('#view').innerHTML,/Задача 11/);
+});
+test('local draft deletion and undo work without server request',async()=>{
+ const c=client();c.run("S.orders=[{id:'draft',sv:'trash',status:'draft',date:'',desc:'Тест'}];S.orderMenuId='draft';S.tab='orders';S.sheet='order-confirm';S.orderConfirmAction='delete'");
+ await c.run("organizeOrder('delete')");assert.equal(c.run('S.orders.length'),0);assert.equal(c.run('S.organizeError'),'');assert.match(c.node('#order-notice').innerHTML,/Отменить/);
+ await c.run('undoOrder()');assert.equal(c.run('S.orders.length'),1);assert.equal(c.run('S.orders[0].id'),'draft');
+});
+test('server deletion is retained across subsequent status refresh',async()=>{
+ const remote={id:'local',serverId:'VG-TEST',status:'sent',sv:'trash',date:'',desc:'Диван',businessStatus:'received',statusVersion:0};
+ const c=client({live:true,fetcher:async(url)=>url.endsWith('/organize')?Response.json({ok:true,order:{...remote,customerVisibility:'deleted'}}):Response.json({ok:true,orders:[]})});
+ c.context.record=remote;c.run("S.orders=[record];S.orderMenuId='local';S.tab='orders';S.sheet='order-confirm';S.orderConfirmAction='delete'");
+ await c.run("organizeOrder('delete')");assert.equal(c.run('S.orders.length'),0);await c.run('syncOrders()');assert.equal(c.run('S.orders.length'),0);
 });

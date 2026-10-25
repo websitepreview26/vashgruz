@@ -37,11 +37,11 @@ export function createStatusService({telegram,stmt,fail}){
    ...JSON.parse(row.payload),serverId:row.id,requestId:row.request_id,status:'sent',businessStatus:row.business_status,
    statusVersion:row.business_version,statusUpdatedAt:row.status_updated_at,createdAt:row.created_at,photoCount:row.photo_count,
    quote:row.quote_amount_minor?{amountMinor:row.quote_amount_minor,currency:'BYN',note:row.quote_note,revision:row.quote_revision}:null,
-   customerNote:row.customer_note||'',history:events.filter(e=>e.order_id===row.id).map(e=>({status:e.status,at:e.changed_at})).reverse()
+   customerNote:row.customer_note||'',customerVisibility:row.customer_visibility||'active',history:events.filter(e=>e.order_id===row.id).map(e=>({status:e.status,at:e.changed_at})).reverse()
   }}
   async function list(request,env,validateInitData){
    const data=await smallJson(request),user=await validateInitData(data.initData,env.BOT_TOKEN);
-   const rows=(await stmt(env,"SELECT * FROM orders WHERE user_id=? AND state='sent' ORDER BY created_at DESC LIMIT 50",String(user.id)).all()).results;
+   const rows=(await stmt(env,"SELECT * FROM orders WHERE user_id=? AND state='sent' AND customer_visibility!='deleted' ORDER BY CASE customer_visibility WHEN 'active' THEN 0 ELSE 1 END,created_at DESC LIMIT 100",String(user.id)).all()).results;
    const events=(await stmt(env,'SELECT e.* FROM order_status_events e JOIN orders o ON o.id=e.order_id WHERE o.user_id=? ORDER BY e.changed_at DESC LIMIT 300',String(user.id)).all()).results;
    return {ok:true,orders:rows.map(row=>publicOrder(row,events))};
   }
@@ -117,6 +117,31 @@ export function createStatusService({telegram,stmt,fail}){
    const events=(await stmt(env,'SELECT * FROM order_status_events WHERE order_id=? ORDER BY changed_at DESC',row.id).all()).results;
    return {ok:true,order:publicOrder(row,events)};
   }
+  async function organize(request,env,validateInitData){
+   const data=await smallJson(request),user=await validateInitData(data.initData,env.BOT_TOKEN);
+   if(!['archive','restore','delete','cancel'].includes(data.action)||typeof data.id!=='string')fail(400,'ACTION','Недоступное действие.');
+   let row=await stmt(env,"SELECT * FROM orders WHERE id=? AND user_id=? AND state='sent'",data.id,String(user.id)).first();
+   if(!row)fail(404,'NOT_FOUND','Заявка не найдена.');
+   if(data.action==='cancel'&&row.business_status!=='cancelled'){
+    if(!['received','processing','quoted','discussion','accepted'].includes(row.business_status))fail(409,'CANNOT_CANCEL','Эту оценку уже нельзя отменить в приложении.');
+    if(data.version!==row.business_version)fail(409,'STALE','Заявка обновилась. Обновите список и повторите действие.');
+    const eventId='customer-cancel:'+row.id+':'+row.business_version,now=Date.now();
+    const changes=await env.DB.batch([
+     stmt(env,"INSERT OR IGNORE INTO order_status_events(event_id,order_id,status,actor_id,changed_at) SELECT ?,id,'cancelled',?,? FROM orders WHERE id=? AND user_id=? AND business_version=?",eventId,String(user.id),now,row.id,String(user.id),data.version),
+     stmt(env,"UPDATE orders SET business_status='cancelled',business_version=business_version+1,status_updated_at=?,customer_visibility='archived' WHERE id=? AND user_id=? AND business_version=? AND EXISTS(SELECT 1 FROM order_status_events WHERE event_id=? AND order_id=orders.id)",now,row.id,String(user.id),data.version,eventId)
+    ]);
+    if(!changes[1].meta.changes)fail(409,'STALE','Заявка уже обновилась.');
+    row=await stmt(env,'SELECT * FROM orders WHERE id=?',row.id).first();
+    try{await edit(env,row)}catch{}
+    await reply(env,{message_id:row.message_id},'Клиент отменил запрос на оценку '+row.id+'.');
+   }else if(data.action!=='cancel'){
+    const visibility={archive:'archived',restore:'active',delete:'deleted'}[data.action];
+    await stmt(env,'UPDATE orders SET customer_visibility=? WHERE id=? AND user_id=?',visibility,row.id,String(user.id)).run();
+    row={...row,customer_visibility:visibility};
+   }
+   const events=(await stmt(env,'SELECT * FROM order_status_events WHERE order_id=? ORDER BY changed_at DESC',row.id).all()).results;
+   return {ok:true,order:publicOrder(row,events)};
+  }
   async function webhook(request,env){
     if(!secretMatches(request.headers.get('X-Telegram-Bot-Api-Secret-Token'),env.TELEGRAM_WEBHOOK_SECRET))fail(403,'WEBHOOK','Доступ запрещён.');
     const update=await smallJson(request),q=update.callback_query,message=update.message;
@@ -167,7 +192,7 @@ export function createStatusService({telegram,stmt,fail}){
     const now=Date.now();
     await env.DB.batch([
       stmt(env,'INSERT OR IGNORE INTO order_status_events(event_id,order_id,status,actor_id,changed_at) SELECT ?,id,?,?,? FROM orders WHERE id=? AND business_version=? AND business_status=? AND state=\'sent\'',q.id,action,String(q.from.id),now,id,version,row.business_status),
-      stmt(env,'UPDATE orders SET business_status=?,business_version=business_version+1,status_updated_at=? WHERE id=? AND business_version=? AND business_status=? AND EXISTS(SELECT 1 FROM order_status_events WHERE event_id=? AND order_id=orders.id AND status=?)',action,now,id,version,row.business_status,q.id,action)
+      stmt(env,"UPDATE orders SET business_status=?,business_version=business_version+1,status_updated_at=?,customer_visibility=CASE WHEN customer_visibility='deleted' THEN 'deleted' WHEN ?='cancelled' THEN 'archived' ELSE customer_visibility END WHERE id=? AND business_version=? AND business_status=? AND EXISTS(SELECT 1 FROM order_status_events WHERE event_id=? AND order_id=orders.id AND status=?)",action,now,action,id,version,row.business_status,q.id,action)
     ]);
     row=await stmt(env,'SELECT * FROM orders WHERE id=?',id).first();
     // Persist first: even if Telegram cannot edit the message, the app sees the actual status.
@@ -197,5 +222,5 @@ export function createStatusService({telegram,stmt,fail}){
     const info=await setupTelegram('getWebhookInfo',new FormData());
     return {ok:true,webhook:info.url===url,pending:info.pending_update_count||0};
   }
-  return {received,list,contact,saveContact,decision,webhook,setup};
+  return {received,list,contact,saveContact,decision,organize,webhook,setup};
 }

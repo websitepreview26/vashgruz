@@ -200,6 +200,12 @@ body{background:var(--bg)}.app-toolbar{display:flex;align-items:center;justify-c
 
 .quote-card{margin-bottom:16px;padding:20px 16px;background:var(--card);border:1px solid var(--acc);border-radius:18px}
 .quote-card>small{font-size:12px;color:var(--mut)}.quote-card>strong{display:block;margin:10px 0;font-size:34px;letter-spacing:-1px;line-height:1.2}.quote-note{font-size:14px;line-height:1.6;white-space:pre-line;overflow-wrap:anywhere}.quote-card .btn2{background:var(--bg)}.quote-card textarea{font-size:15px;padding:12px 0;min-height:88px}.list-quote{display:block;font-size:20px;margin-top:12px}
+
+.order-folders{display:flex;gap:4px;padding:4px;background:var(--line);border-radius:13px;margin:0 0 19px}
+.order-folders button{flex:1;border-radius:10px;padding:11px 5px;font-size:13px;color:var(--mut);display:flex;justify-content:center;gap:7px;align-items:center}.order-folders button[aria-pressed=true]{background:var(--card);color:var(--ink);font-weight:600}.order-folders span{font-size:11px;opacity:.65}
+.order-menu{display:grid;place-items:center;width:36px;height:36px;border-radius:11px;font-size:25px;flex:none;background:var(--bg);color:var(--mut)}
+.order-open{margin:15px -16px -16px;padding:13px 16px;display:flex;align-items:center;justify-content:space-between;width:calc(100% + 32px);border-top:1px solid var(--line);font-size:13px;text-align:left}.order-open svg{width:17px;height:17px;color:var(--mut)}.order-description{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.sheet-action{width:100%;text-align:left;padding:16px;border-radius:14px;background:var(--card);margin-top:8px;font-size:15px}.sheet-action:disabled{opacity:.6}.sheet-action.danger{color:#d66358}.order-notice{position:absolute;z-index:12;left:16px;right:16px;bottom:calc(85px + var(--app-safe-bottom) + var(--app-content-bottom));padding:15px 16px;border-radius:14px;background:var(--navy);color:#fff;box-shadow:0 5px 25px #0002;display:flex;align-items:center;justify-content:space-between;gap:12px;font-size:13px}.order-notice button{color:var(--acc);font-weight:600;font-size:13px}
 </style>
 </head>
 <body>
@@ -208,6 +214,7 @@ body{background:var(--bg)}.app-toolbar{display:flex;align-items:center;justify-c
   <input id="photo-input" class="native-photo-picker" tabindex="-1" type="file" accept="image/*" multiple aria-label="Добавить фотографии">
   <div class="dock" id="dock" hidden><button id="go"></button></div>
   <nav class="tabs" id="tabs"></nav>
+  <div id="order-notice" class="order-notice" role="status" hidden></div>
   <div id="layer"><div class="scrim" data-a="close"></div><div class="sheet" id="sheet" role="dialog" aria-modal="true" aria-hidden="true" inert></div></div>
 </div>
 <script>
@@ -283,7 +290,7 @@ const fd = (s, long) => !s ? 'По согласованию' : new Date(s+'T12:0
 const user = tg && tg.initDataUnsafe && tg.initDataUnsafe.user;
 const API_BASE=String(window.VG_CONFIG?.apiBase||'').replace(/\/$/,'');
 const photoCache=new Map();
-let S = {tab:'home', w:null, step:0, last:null, sheet:null, cal:null, anim:'', orders:[], errors:{},sending:false,preparing:false,contactBusy:false,phoneManual:false,contactError:'',discussing:false,discussionText:'',discussionVersion:null,decisionError:'',photoError:'',submitError:''};
+let S = {tab:'home', w:null, step:0, last:null, sheet:null, cal:null, anim:'', orders:[], errors:{},sending:false,preparing:false,contactBusy:false,phoneManual:false,contactError:'',listTab:'active',listLimit:8,orderMenuId:null,orderConfirmAction:null,organizing:false,organizeError:'',discussing:false,discussionText:'',discussionVersion:null,decisionError:'',photoError:'',submitError:''};
 try {
  const current=localStorage.getItem('vg-requests-v2');
  if(current){const o=JSON.parse(current);if(Array.isArray(o))S.orders=o}
@@ -297,7 +304,7 @@ function save(){try{localStorage.setItem('vg-requests-v2',JSON.stringify(S.order
 const TABS = [['home','Заказ','truck'],['orders','Заявки','list']];
 $('#tabs').innerHTML = TABS.map(t => `<button data-a="tab" data-v="${t[0]}">${ic(t[2])}${t[1]}</button>`).join('');
 if (inTg) tg.BackButton.onClick(back);
-function back(animated=true){if(S.sending||S.preparing)return;hap();if(S.discussing){S.discussing=false;return render(true)}if(S.sheet)return close();S.errors={};S.anim=animated===false?'':'ab';if(S.w&&S.step>0)S.step--;else{if(S.w&&(S.w.desc.trim()||S.w.addr.trim()))storeDraft();const wasDone=S.tab==='done';S.w=null;S.tab=wasDone?'orders':'home'}render()}
+function back(animated=true){if(S.sending||S.preparing||S.organizing)return;hap();if(S.discussing){S.discussing=false;return render(true)}if(S.sheet)return close();S.errors={};S.anim=animated===false?'':'ab';if(S.w&&S.step>0)S.step--;else{if(S.w&&(S.w.desc.trim()||S.w.addr.trim()))storeDraft();const wasDone=S.tab==='done';S.w=null;S.tab=wasDone?'orders':'home'}render()}
 function home(){
  const draft=S.orders.find(o=>o.status==='draft');
  return `<div class="hrow"><h1>Что нужно вывезти<br>или перевезти?</h1></div>
@@ -347,10 +354,16 @@ function orderProgress(o){
  const keys=['received','processing','quoted','accepted'],current=state==='discussion'?1:keys.indexOf(state);
  return `<section class="order-status-panel ${state==='cancelled'?'cancelled':''}"><h2>${meta.title}</h2><p>${meta.text}</p>${['cancelled','confirmed','completed'].includes(state)?'':`<div class="order-progress">${keys.map((key,i)=>{const event=[...(o.history||[])].reverse().find(e=>e.status===key);return `<div class="${i<=current?'reached':''} ${i===current?'current':''}"><i>${i<current?'✓':''}</i><b>${['Получена','На оценке','Предложение','Цена принята'][i]}</b><small>${event?esc(statusTime(event.at)):''}</small></div>`}).join('')}</div>`}<small class="status-updated">${o.statusUpdatedAt?'Обновлено '+esc(statusTime(o.statusUpdatedAt)):''}</small></section>`;
 }
-let statusTimer=null,statusSync=null,lastStatusFetch=0,statusError='',statusLoading=false;
-function orders(){return `<div class="app-receipt-head"><h1>Заявки</h1><div><button data-a="refresh-orders" aria-label="Обновить статусы" style="margin-right:18px">↻</button><button data-a="tab" data-v="home">+ Новая</button></div></div>${statusError?`<button class="sync-note" data-a="refresh-orders">${esc(statusError)} · Повторить</button>`:statusLoading&&!S.orders.length?'<p class="hint" role="status">Загружаем заявки…</p>':''}`+(S.orders.length?S.orders.map(o=>`<div class="ord"><div class="h"><span class="ib" style="--c:${sv(o.sv).c}">${ic(o.sv)}</span><div><b>${sv(o.sv).n}</b><br><small>№ ${esc(o.serverId||o.id)} · ${esc(fd(o.date))}</small></div></div><span class="status ${o.businessStatus==='cancelled'?'cancelled':''}" role="status">${o.status==='sent'?(statusOf(o).short||statusOf(o).title):o.status==='demo'?'Демо-заявка':o.status==='prepared'?'Подготовлена':'Черновик'}</span>${o.status==='sent'&&o.quote?`<b class="list-quote">${quoteMoney(o.quote.amountMinor)}</b>`:''}<p class="sub" style="font-size:14px">${esc(o.desc||o.addr)}</p>${o.statusUpdatedAt?`<small>Обновлено ${esc(statusTime(o.statusUpdatedAt))}</small>`:''}<div class="order-foot"><button class="btn2" data-a="open-request" data-v="${esc(o.id)}">${o.status!=='draft'?'Открыть':'Продолжить'}</button><button class="review-edit" data-a="again" data-v="${esc(o.id)}">Повторить</button></div></div>`).join(''):statusLoading?'':`<div class="empty"><div class="ib">${ic('list')}</div><b style="color:var(--ink);font-size:18px">Заявок пока нет</b><p style="margin:6px 0 18px">Расскажите, с чем нужна помощь</p><button class="btn2" style="background:var(--acc);color:var(--accx)" data-a="tab" data-v="home">Выбрать услугу</button></div>`)}
+let statusTimer=null,statusSync=null,lastStatusFetch=0,statusError='',statusLoading=false,orderListEpoch=0;
+function visibilityOf(o){return o.customerVisibility||(['cancelled','completed','confirmed'].includes(o.businessStatus)?'archived':'active')}
+function visibleOrders(){return S.orders.filter(o=>visibilityOf(o)!=='deleted'&&(S.listTab==='archive'?visibilityOf(o)==='archived':visibilityOf(o)!=='archived'))}
+function orders(){
+ const active=S.orders.filter(o=>visibilityOf(o)==='active').length,archive=S.orders.filter(o=>visibilityOf(o)==='archived').length,rows=visibleOrders();
+ const cards=rows.slice(0,S.listLimit).map(o=>`<article class="ord"><div class="h"><span class="ib" style="--c:${sv(o.sv).c}">${ic(o.sv)}</span><div><b>${sv(o.sv).n}</b><br><small>№ ${esc(o.serverId||o.id)} · ${esc(fd(o.date))}</small></div><button class="order-menu" data-a="order-menu" data-v="${esc(o.id)}" aria-label="Действия с заявкой">⋯</button></div><span class="status ${o.businessStatus==='cancelled'?'cancelled':''}" role="status">${o.status==='sent'?(statusOf(o).short||statusOf(o).title):o.status==='demo'?'Демо-заявка':o.status==='prepared'?'Подготовлена':'Черновик'}</span>${o.status==='sent'&&o.quote?`<b class="list-quote">${quoteMoney(o.quote.amountMinor)}</b>`:''}<p class="sub order-description">${esc(o.desc||o.addr)}</p>${o.statusUpdatedAt?`<small>Обновлено ${esc(statusTime(o.statusUpdatedAt))}</small>`:''}<button class="order-open" data-a="open-request" data-v="${esc(o.id)}">${o.status==='draft'?'Продолжить':'Открыть'} ${ic('chev')}</button></article>`).join('');
+ return `<div class="app-receipt-head"><h1>Заявки</h1><div><button data-a="refresh-orders" aria-label="Обновить статусы" style="margin-right:18px">↻</button><button data-a="tab" data-v="home">+ Новая</button></div></div><div class="order-folders" role="group" aria-label="Раздел заявок"><button data-a="order-folder" data-v="active" aria-pressed="${S.listTab==='active'}">Активные <span>${active}</span></button><button data-a="order-folder" data-v="archive" aria-pressed="${S.listTab==='archive'}">Архив <span>${archive}</span></button></div>${statusError?`<button class="sync-note" data-a="refresh-orders">${esc(statusError)} · Повторить</button>`:statusLoading&&!S.orders.length?'<p class="hint" role="status">Загружаем заявки…</p>':''}${cards}${rows.length>S.listLimit?`<button class="btn2" data-a="more-orders">Показать ещё (${rows.length-S.listLimit})</button>`:''}${!rows.length&&!statusLoading?`<div class="empty"><div class="ib">${ic('list')}</div><b style="color:var(--ink);font-size:18px">${S.listTab==='archive'?'Архив пуст':'Нет активных заявок'}</b><p style="margin:6px 0 18px">${S.listTab==='archive'?'Сюда можно убрать старые заявки.':'Выберите услугу, чтобы получить оценку.'}</p>${S.listTab==='active'?'<button class="btn2" style="background:var(--acc);color:var(--accx)" data-a="tab" data-v="home">Получить оценку</button>':''}</div>`:''}`;
+}
 function done(){const o=S.last,sent=o.status==='sent';
- if(sent)return `<div class="app-receipt-head"><h1>Заявка</h1><button data-a="refresh-orders" aria-label="Обновить статус">↻</button></div><p class="hint" style="margin-bottom:18px">№ ${esc(o.serverId||o.id)}</p>${orderProgress(o)}${quoteCard(o)}${statusError?`<button class="sync-note" data-a="refresh-orders">${esc(statusError)} · Повторить</button>`:''}${ticket(o)}`;
+ if(sent)return `<div class="app-receipt-head"><h1>Заявка</h1><button class="order-menu" data-a="order-menu" data-v="${esc(o.id)}" aria-label="Действия с заявкой">⋯</button></div><p class="hint" style="margin-bottom:18px">№ ${esc(o.serverId||o.id)}</p>${orderProgress(o)}${quoteCard(o)}${statusError?`<button class="sync-note" data-a="refresh-orders">${esc(statusError)} · Повторить</button>`:''}${ticket(o)}`;
  return `<div class="done"><div class="ring">${ic('check')}</div><h1>Заявка создана</h1><p class="sub">№ ${esc(o.id.slice(-6))}</p></div><div class="app-status"><i></i>Демо · сохранена на устройстве</div>${ticket(o)}<p class="fine">Отправка на расчёт пока не подключена.</p><button class="btn2" data-a="edit-last">Изменить заявку</button>`;
 }
 function quoteMoney(minor){return (Number(minor)/100).toLocaleString('ru-RU',{maximumFractionDigits:2})+' BYN'}
@@ -393,18 +406,63 @@ function mergeOrders(remote){
 }
 async function syncOrders(){
  if(statusSync||!API_BASE||!inTg||!tg.initData)return;
- statusLoading=true;
+ statusLoading=true;const epoch=orderListEpoch;
  statusSync=(async()=>{
   try{
    const response=await fetch(API_BASE+'/api/orders/list',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({initData:tg.initData}),signal:AbortSignal.timeout(15000)});
    const data=await response.json();if(!response.ok||!data.ok||!Array.isArray(data.orders))throw new Error(response.status===401?'Откройте приложение заново':'Нет связи');
-   mergeOrders(data.orders);statusError='';
+   if(epoch===orderListEpoch){mergeOrders(data.orders);statusError='';}
   }catch(e){statusError=e.message==='Откройте приложение заново'?e.message:'Не удалось обновить статусы'}
   finally{statusLoading=false;lastStatusFetch=Date.now();if(statusScreen()&&!S.sheet&&!S.discussing)render(true)}
  })();
  try{await statusSync}finally{statusSync=null;scheduleStatuses()}
 }
+function orderActionsSheet(){
+ const o=S.orders.find(x=>x.id===S.orderMenuId);if(!o)return '<div class="grab"></div><h3>Заявка не найдена</h3>';
+ const busy=S.organizing?'disabled':'';
+ if(S.sheet==='order-confirm'){
+  const deleting=S.orderConfirmAction==='delete';
+  return `<div class="grab"></div><h3>${deleting?'Удалить из списка?':'Отменить оценку?'}</h3><p class="hint">${deleting?(o.serverId?'Заявка исчезнет из вашего списка, но останется у менеджера. Это не отменяет оценку.':'Черновик будет удалён с этого устройства.'):'Менеджер получит уведомление. Заявка переместится в архив.'}</p><p class="error" role="alert">${esc(S.organizeError)}</p><button class="sheet-action danger" data-a="order-organize" data-v="${S.orderConfirmAction}" ${busy}>${S.organizing?'Подождите…':deleting?'Удалить из списка':'Отменить оценку'}</button>`;
+ }
+ return `<div class="grab"></div><h3>Заявка № ${esc((o.serverId||o.id).slice(-12))}</h3><button class="sheet-action" data-a="again" data-v="${esc(o.id)}" ${busy}>Повторить оценку</button><button class="sheet-action" data-a="order-organize" data-v="${visibilityOf(o)==='archived'?'restore':'archive'}" ${busy}>${S.organizing?'Подождите…':visibilityOf(o)==='archived'?'Вернуть в активные':'Убрать в архив'}</button>${o.serverId&&['received','processing','quoted','discussion','accepted'].includes(o.businessStatus||'received')?`<button class="sheet-action" data-a="order-confirm" data-v="cancel" ${busy}>Отменить оценку</button>`:''}<button class="sheet-action danger" data-a="order-confirm" data-v="delete" ${busy}>Удалить из списка</button><p class="error" role="alert">${esc(S.organizeError)}</p>`;
+}
+function updateOrderSheet(){const sheet=$('#sheet');sheet.innerHTML=orderActionsSheet()+'<button class="btn2" data-a="close">Закрыть</button>';sheet.querySelector('button:not(:disabled)')?.focus({preventScroll:true})}
+let orderUndo=null,noticeTimer=null;
+function showOrderNotice(text,undo=null){
+ if(typeof window.clearTimeout==='function')window.clearTimeout(noticeTimer);
+ orderUndo=undo;const notice=$('#order-notice');notice.hidden=false;notice.innerHTML=`<span>${esc(text)}</span>${undo?'<button data-a="undo-order">Отменить</button>':''}`;
+ if(typeof window.setTimeout==='function')noticeTimer=window.setTimeout(()=>{notice.hidden=true;orderUndo=null},6000);
+}
+async function organizationApi(o,action){
+ const response=await fetch(API_BASE+'/api/orders/organize',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({initData:tg.initData,id:o.serverId,action,version:o.statusVersion}),signal:AbortSignal.timeout(20000)});
+ const data=await response.json();if(!response.ok||!data.ok)throw new Error(data.message||'Не удалось изменить заявку. Попробуйте ещё раз.');return {...o,...data.order,id:o.id};
+}
+async function organizeOrder(action){
+ const o=S.orders.find(x=>x.id===S.orderMenuId);if(!o||S.organizing)return;
+ const previous=visibilityOf(o);S.organizing=true;S.organizeError='';orderListEpoch++;updateOrderSheet();
+ try{
+  let updated;
+  if(o.serverId&&o.status==='sent')updated=await organizationApi(o,action);
+  else updated={...o,customerVisibility:{archive:'archived',restore:'active',delete:'deleted'}[action]};
+  orderListEpoch++;
+  if(action==='delete')S.orders=S.orders.filter(x=>x.id!==o.id);else S.orders=S.orders.map(x=>x.id===o.id?updated:x);
+  if(S.last?.id===o.id){S.last=action==='delete'?null:updated;S.tab='orders';S.discussing=false}
+  save();close();render(true);
+  showOrderNotice({archive:'Заявка в архиве',restore:'Заявка в активных',delete:'Заявка удалена из списка',cancel:'Оценка отменена'}[action],action==='cancel'?null:{order:o,previous});
+ }catch(e){S.organizeError=e.name==='TypeError'||e.name==='TimeoutError'?'Не удалось подтвердить действие. Попробуйте повторно.':e.message}
+ finally{S.organizing=false;if(S.sheet==='order-actions'||S.sheet==='order-confirm')updateOrderSheet()}
+}
+async function undoOrder(){
+ const undo=orderUndo;if(!undo||S.organizing)return;S.organizing=true;orderListEpoch++;
+ try{
+  let updated={...undo.order,customerVisibility:undo.previous};
+  if(undo.order.serverId&&undo.order.status==='sent')updated=await organizationApi(undo.order,undo.previous==='archived'?'archive':'restore');
+  orderListEpoch++;const index=S.orders.findIndex(o=>o.id===updated.id);if(index<0)S.orders.unshift(updated);else S.orders[index]=updated;
+  save();render(true);showOrderNotice('Действие отменено');
+ }catch{showOrderNotice('Не удалось вернуть заявку. Попробуйте обновить список.',undo)}finally{S.organizing=false}
+}
 function sheetHTML(){
+ if(S.sheet==='order-actions'||S.sheet==='order-confirm')return orderActionsSheet();
  if(S.sheet==='svc')return `<div class="grab"></div><h3>Услуга</h3>${SV.map(s=>`<button class="opt" style="--c:${s.c}" data-a="pick" data-v="${s.id}" aria-pressed="${S.w.sv===s.id}"><span class="ib sm">${ic(s.id)}</span><div><b>${s.n}</b><small>${s.d}</small></div>${S.w.sv===s.id?ic('check'):''}</button>`).join('')}`;
  const {y,m}=S.cal,w=S.w,first=new Date(y,m,1),off=(first.getDay()+6)%7,n=new Date(y,m+1,0).getDate(),now=new Date();
  const cells=Array(off).fill('<span></span>').concat(Array.from({length:n},(_,i)=>{const d=iso(new Date(y,m,i+1));return `<button data-a="pickd" data-v="${d}" class="${d===today()?'now ':''}${d===w.date?'sel':''}" ${d<today()?'disabled':''} aria-label="${fd(d)}">${i+1}</button>`}));
@@ -419,7 +477,7 @@ function openSheet(k){
  const sheet=$('#sheet'),layer=$('#layer');
  layer.className='';
  sheet.innerHTML=sheetHTML()+'<button class="btn2" data-a="close">Закрыть</button>';
- sheet.setAttribute('aria-label',k==='cal'?'Выбор даты':'Выбор услуги');
+ sheet.setAttribute('aria-label',k.startsWith('order-')?'Действия с заявкой':k==='cal'?'Выбор даты':'Выбор услуги');
  sheet.setAttribute('aria-hidden','false');sheet.inert=false;sheet.scrollTop=0;
  // Commit the off-screen position before starting the entrance transition.
  sheet.getBoundingClientRect();
@@ -558,15 +616,21 @@ async function addPhotos(files){
 }
 function render(preserve=false){edgeBack.cancel();const oldScroll=$('#view').scrollTop;const wiz=!!S.w,v=$('#view');const active=document.activeElement;if(active&&v.contains(active)&&active.matches('input,textarea,select'))active.blur();v.className=S.anim;S.anim='';v.innerHTML=wiz?wizard():({home,orders,done}[S.tab]||home)();v.scrollTop=preserve?oldScroll:0;if(!preserve)v.focus({preventScroll:true});$('#dock').hidden=!wiz&&S.tab!=='done';$('#tabs').hidden=wiz||S.tab==='done';if(!wiz&&S.tab==='done'){$('#go').disabled=S.sending;$('#go').textContent=S.sending?'Отправляем…':S.last?.businessStatus==='quoted'?(S.discussing?'Отправить вопрос':'Подходит, согласовать'):'Мои заявки';}document.querySelectorAll('#tabs button').forEach(b=>b.setAttribute('aria-current',b.dataset.v===S.tab));if(inTg)(wiz||S.tab==='done')?tg.BackButton.show():tg.BackButton.hide();if(wiz)refresh();$('#view').inert=S.sending;scheduleStatuses()}
 const keep=fn=>{const y=$('#view').scrollTop;fn();render();$('#view').scrollTop=y};
-document.addEventListener('click',e=>{const b=e.target.closest('[data-a]');if(!b)return;const a=b.dataset.a,v=b.dataset.v,k=b.dataset.k,w=S.w;if(S.sending||S.preparing)return;hap();
+document.addEventListener('click',e=>{const b=e.target.closest('[data-a]');if(!b)return;const a=b.dataset.a,v=b.dataset.v,k=b.dataset.k,w=S.w;if(S.sending||S.preparing||S.organizing)return;hap();
  if(a==='discuss-quote'){S.discussing=true;S.discussionText='';S.discussionVersion=S.last.statusVersion;S.decisionError='';return render(true)}
  if(a==='cancel-discussion'){S.discussing=false;return render(true)}
  if(a==='share-phone')return requestPhone();
  if(a==='manual-phone'){S.phoneManual=true;S.contactError='';return render(true)}
+ if(a==='order-folder'){S.listTab=v;S.listLimit=8;return render()}
+ if(a==='more-orders'){S.listLimit+=8;return render(true)}
+ if(a==='order-menu'){S.orderMenuId=v;S.orderConfirmAction=null;S.organizeError='';return openSheet('order-actions')}
+ if(a==='order-confirm'){S.orderConfirmAction=v;S.sheet='order-confirm';return updateOrderSheet()}
+ if(a==='order-organize')return organizeOrder(v);
+ if(a==='undo-order')return undoOrder();
  if(a==='refresh-orders'){lastStatusFetch=0;return syncOrders()}
  if(a==='tab'){if(v==='orders')lastStatusFetch=0;S.tab=v;S.anim='af';return render()}
  if(a==='start'){S.phoneManual=false;S.contactError='';S.submitError='';S.photoError='';S.w=newW(v);S.step=0;S.errors={};S.anim='af';return render()}
- if(a==='again'||a==='open-request'){const o=S.orders.find(x=>x.id===v);if(!o)return;if(a==='open-request'&&o.status!=='draft'){S.discussing=false;S.decisionError='';S.last=o;S.tab='done';return render()}const cached=a==='again'?[]:photoCache.get(o.id)||[];S.photoError=a!=='again'&&o.photoCount&&!cached.length?'Фото из черновика нужно добавить заново.':'';S.submitError='';S.phoneManual=false;S.contactError='';S.w={...newW(o.sv),...o,...(a==='again'?{id:null,serverId:null,submitId:null,businessStatus:null,history:[],statusUpdatedAt:null,date:'',slot:0}: {}),photos:cached};S.step=a==='again'?0:Math.min(o.step||0,2);S.errors={};return render()}
+ if(a==='again'||a==='open-request'){if(S.sheet)close();const o=S.orders.find(x=>x.id===v);if(!o)return;if(a==='open-request'&&o.status!=='draft'){S.discussing=false;S.decisionError='';S.last=o;S.tab='done';return render()}const cached=a==='again'?[]:photoCache.get(o.id)||[];S.photoError=a!=='again'&&o.photoCount&&!cached.length?'Фото из черновика нужно добавить заново.':'';S.submitError='';S.phoneManual=false;S.contactError='';S.w={...newW(o.sv),...o,...(a==='again'?{id:null,serverId:null,submitId:null,businessStatus:null,statusVersion:0,quote:null,customerVisibility:'active',customerNote:'',history:[],statusUpdatedAt:null,date:'',slot:0}: {}),photos:cached};S.step=a==='again'?0:Math.min(o.step||0,2);S.errors={};return render()}
  if(a==='back')return back();
  if(a==='exit'){if(w.desc.trim()||w.addr.trim()||w.phone.trim())storeDraft();S.w=null;S.errors={};S.tab='home';S.anim='ab';return render()}
  if(a==='edit'){S.step=+v;S.errors={};return render()}

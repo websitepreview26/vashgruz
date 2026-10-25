@@ -152,11 +152,12 @@ export default {
       }
       if(!allowed||origin!==allowed)fail(403,'ORIGIN','Откройте мини-приложение через Telegram.');
       if(request.method==='OPTIONS')return new Response(null,{status:204,headers});
-      if(!['/api/orders','/api/orders/list','/api/contact','/api/orders/decision'].includes(path))fail(404,'NOT_FOUND','Не найдено.');
+      if(!['/api/orders','/api/orders/list','/api/contact','/api/orders/decision','/api/orders/organize'].includes(path))fail(404,'NOT_FOUND','Не найдено.');
       if(request.method!=='POST')fail(405,'METHOD','Метод не поддерживается.');
       if(!env.DB||!env.BOT_TOKEN||!env.TELEGRAM_CHAT_ID)fail(503,'SETUP','Приём заявок ещё настраивается. Попробуйте позже.');
       if(path==='/api/orders/list')return json(await statusService.list(request,env,validateInitData));
       if(path==='/api/orders/decision')return json(await statusService.decision(request,env,validateInitData));
+      if(path==='/api/orders/organize')return json(await statusService.organize(request,env,validateInitData));
       if(path==='/api/contact')return json(await statusService.contact(request,env,validateInitData));
       const form=await boundedForm(request),user=await validateInitData(form.get('initData'),env.BOT_TOKEN);
       const requestId=form.get('requestId');
