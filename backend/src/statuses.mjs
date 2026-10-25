@@ -94,9 +94,13 @@ export function createStatusService({telegram,stmt,fail}){
    await telegram(env,'editMessageReplyMarkup',form);
    await stmt(env,'UPDATE orders SET buttons_version=1 WHERE id=?',row.id).run();
   }
-  async function reply(env,message,text){
+  async function reply(env,message,text,markup){
    const f=new FormData();f.set('chat_id',env.TELEGRAM_CHAT_ID);f.set('text',text);f.set('reply_parameters',JSON.stringify({message_id:message.message_id}));
-   try{await telegram(env,'sendMessage',f)}catch{}
+   if(markup)f.set('reply_markup',JSON.stringify(markup));
+   try{await telegram(env,'sendMessage',f)}catch(e){
+    // A privacy restriction may reject a user-ID link. Keep the phone notification.
+    if(markup&&e.code==='DELIVERY'){f.delete('reply_markup');try{await telegram(env,'sendMessage',f)}catch{}}
+   }
   }
   async function priceReply(env,message){
    if(String(message.chat?.id)!==String(env.TELEGRAM_CHAT_ID)||!message.reply_to_message||!Number.isSafeInteger(message.from?.id))return;
@@ -140,7 +144,11 @@ export function createStatusService({telegram,stmt,fail}){
     if(!changes[1].meta.changes)fail(409,'QUOTE_CHANGED','Предложение уже обновлено.');
     row=await stmt(env,'SELECT * FROM orders WHERE id=?',row.id).first();
     try{await edit(env,row)}catch{}
-    await reply(env,{message_id:row.message_id},data.action==='accept'?`Клиент принял стоимость ${money(row.quote_amount_minor)} по заявке ${row.id}. Свяжитесь с ним для согласования времени.`:`Клиент просит уточнить условия по заявке ${row.id}.${note?'\n'+note:''}`);
+    const payload=JSON.parse(row.payload),username=/^[A-Za-z0-9_]{5,32}$/.test(user.username||'')?user.username:'';
+    const contact=`\n\nТелефон: ${payload.phone}${username?'\nTelegram: @'+username:''}`;
+    const text=data.action==='accept'?`Клиент принял стоимость ${money(row.quote_amount_minor)} по заявке ${row.id}.\nСвяжитесь с ним для согласования времени.`:`Клиент просит уточнить условия по заявке ${row.id}.${note?'\n'+note:''}`;
+    const markup={inline_keyboard:[[{text:'Написать клиенту в Telegram',url:username?'https://t.me/'+username:'tg://user?id='+row.user_id}]]};
+    await reply(env,{message_id:row.message_id},text+contact,markup);
    }
    const events=(await stmt(env,'SELECT * FROM order_status_events WHERE order_id=? ORDER BY changed_at DESC',row.id).all()).results;
    return {ok:true,order:publicOrder(row,events)};

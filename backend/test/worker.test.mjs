@@ -346,3 +346,27 @@ test('contact diagnostics require signed owner and never store phone or raw call
  const stored=e.sqlite.prepare('SELECT details FROM contact_diagnostics').get().details;
  assert(!stored.includes('375'));assert(!stored.includes('private raw'));assert.match(stored,/failed/);assert.match(stored,/9.2/);
 });
+
+test('acceptance notification includes the order phone and a direct Telegram button',async()=>{
+ const {e,calls,id}=await quoteFixture();await worker.fetch(await decisionRequest(id,2,'accept'),e);
+ const notice=calls.find(c=>c.method==='sendMessage'&&c.form.get('text')?.includes('Свяжитесь с ним'));
+ assert(notice);assert.match(notice.form.get('text'),/Телефон: \+375291234567/);assert.match(notice.form.get('text'),/Telegram: @local_test/);
+ assert.equal(JSON.parse(notice.form.get('reply_markup')).inline_keyboard[0][0].url,'https://t.me/local_test');
+ assert.equal(JSON.parse(notice.form.get('reply_parameters')).message_id,100);
+});
+test('customer without username gets a user-ID button and phone in the discussion notice',async()=>{
+ const {e,calls,id}=await quoteFixture();const init=await auth({user:JSON.stringify({id:42,first_name:'Тест'})});
+ await worker.fetch(await decisionRequest(id,2,'discuss',{init,note:'В какое время?'}),e);
+ const notice=calls.find(c=>c.method==='sendMessage'&&c.form.get('text')?.includes('Клиент просит'));
+ assert.match(notice.form.get('text'),/Телефон: \+375291234567/);assert(!notice.form.get('text').includes('Telegram: @'));
+ assert.equal(JSON.parse(notice.form.get('reply_markup')).inline_keyboard[0][0].url,'tg://user?id=42');
+});
+test('privacy rejection of contact button falls back to text with phone without reversing acceptance',async()=>{
+ const {e,id}=await quoteFixture();let rejected=false;const calls=telegramMock((method,calls)=>{
+  const form=calls.at(-1).form;
+  if(method==='sendMessage'&&form.get('text')?.includes('Свяжитесь с ним')&&form.get('reply_markup')){rejected=true;return Response.json({ok:false,error_code:400},{status:400})}
+ });
+ assert.equal((await worker.fetch(await decisionRequest(id,2,'accept'),e)).status,200);assert(rejected);
+ const notices=calls.filter(c=>c.method==='sendMessage');assert.equal(notices.length,2);assert.equal(notices[1].form.get('reply_markup'),null);assert.match(notices[1].form.get('text'),/Телефон:/);
+ assert.equal(e.sqlite.prepare('SELECT business_status FROM orders').get().business_status,'accepted');
+});
