@@ -25,6 +25,7 @@ function env(){
   const sqlite=new DatabaseSync(':memory:');
   sqlite.exec(readFileSync(new URL('../migrations/0001_orders.sql',import.meta.url),'utf8'));
   sqlite.exec(readFileSync(new URL('../migrations/0002_statuses.sql',import.meta.url),'utf8'));
+  sqlite.exec(readFileSync(new URL('../migrations/0003_contacts.sql',import.meta.url),'utf8'));
   return {BOT_TOKEN:TOKEN,TELEGRAM_CHAT_ID:'-100123456789',ALLOWED_ORIGIN:ORIGIN,DB:{
     prepare(sql){return {bind(...args){return {
       sql,args,
@@ -197,4 +198,15 @@ test('bootstrap is protected and never overwrites an unrelated webhook',async()=
  assert.equal((await worker.fetch(req('bad'),e)).status,403);
  const calls=telegramMock(method=>method==='getWebhookInfo'?Response.json({ok:true,result:{url:'https://other.example/webhook'}}):undefined);
  assert.equal((await worker.fetch(req(WEBHOOK_SECRET),e)).status,409);assert(!calls.some(c=>c.method==='setWebhook'));
+});
+
+test('Telegram contact is accepted only from its owner in private chat',async()=>{
+ const e={...env(),TELEGRAM_WEBHOOK_SECRET:WEBHOOK_SECRET};
+ const update=(sender,contactUser,chat=sender)=>new Request('https://api.example/telegram/webhook',{method:'POST',headers:{'X-Telegram-Bot-Api-Secret-Token':WEBHOOK_SECRET},body:JSON.stringify({message:{from:{id:sender,first_name:'Customer'},chat:{id:chat,type:chat>0?'private':'group'},contact:{user_id:contactUser,phone_number:'375291234567'}}})});
+ await worker.fetch(update(42,99),e);await worker.fetch(update(42,42,-100),e);assert.equal(e.sqlite.prepare('SELECT COUNT(*) n FROM customer_contacts').get().n,0);
+ await worker.fetch(update(42,42),e);assert.equal(e.sqlite.prepare('SELECT phone FROM customer_contacts').get().phone,'+375291234567');
+ const own=new Request('https://api.example/api/contact',{method:'POST',headers:{origin:ORIGIN},body:JSON.stringify({initData:await auth()})});
+ assert.equal((await (await worker.fetch(own,e)).json()).phone,'+375291234567');
+ const other=new Request('https://api.example/api/contact',{method:'POST',headers:{origin:ORIGIN},body:JSON.stringify({initData:await auth({user:JSON.stringify({id:99})})})});
+ assert.equal((await (await worker.fetch(other,e)).json()).phone,'');
 });

@@ -38,8 +38,8 @@ export function validateOrder(raw){
     return v.trim().replace(/[\x00-\x08\x0b\x0c\x0e-\x1f]/g,'');
   };
   if(!Object.hasOwn(names,raw.sv))fail(400,'ORDER','Выберите услугу.');
-  const w={sv:raw.sv,desc:text('desc',1000),addr:text('addr',220,true),to:text('to',220,raw.sv==='flat'||raw.sv==='office'),name:text('name',60),phone:text('phone',25)};
-  if(!/^(?:375\d{9}|80\d{9})$/.test(w.phone.replace(/\D/g,'')))fail(400,'ORDER','Проверьте номер телефона.');
+  const w={sv:raw.sv,desc:text('desc',1000),addr:text('addr',220,true),to:text('to',220,raw.sv==='flat'||raw.sv==='office'),name:raw.name===undefined?'':text('name',60),phone:text('phone',25)};
+  if(!/^\+?[1-9]\d{8,14}$/.test(w.phone.replace(/[\s()-]/g,'')))fail(400,'ORDER','Проверьте номер телефона.');
   for(const k of ['floor','toFloor']){
     if(!Number.isInteger(raw[k])||raw[k]<1||raw[k]>50)fail(400,'ORDER','Проверьте этаж.');
     w[k]=raw[k];
@@ -151,15 +151,17 @@ export default {
       }
       if(!allowed||origin!==allowed)fail(403,'ORIGIN','Откройте мини-приложение через Telegram.');
       if(request.method==='OPTIONS')return new Response(null,{status:204,headers});
-      if(!['/api/orders','/api/orders/list'].includes(path))fail(404,'NOT_FOUND','Не найдено.');
+      if(!['/api/orders','/api/orders/list','/api/contact'].includes(path))fail(404,'NOT_FOUND','Не найдено.');
       if(request.method!=='POST')fail(405,'METHOD','Метод не поддерживается.');
       if(!env.DB||!env.BOT_TOKEN||!env.TELEGRAM_CHAT_ID)fail(503,'SETUP','Приём заявок ещё настраивается. Попробуйте позже.');
       if(path==='/api/orders/list')return json(await statusService.list(request,env,validateInitData));
+      if(path==='/api/contact')return json(await statusService.contact(request,env,validateInitData));
       const form=await boundedForm(request),user=await validateInitData(form.get('initData'),env.BOT_TOKEN);
       const requestId=form.get('requestId');
       if(typeof requestId!=='string'||!/^[a-zA-Z0-9_-]{16,80}$/.test(requestId))fail(400,'ID','Неверный номер запроса.');
       let raw;try{raw=JSON.parse(form.get('order'))}catch{fail(400,'ORDER','Не удалось прочитать заявку.')}
       const w=validateOrder(raw),photos=form.getAll('photos');await validatePhotos(photos);
+      w.name=String(user.first_name||'').slice(0,60);
       const hashes=await Promise.all(photos.map(async p=>hex(await crypto.subtle.digest('SHA-256',await p.arrayBuffer()))));
       const fingerprint=hex(await crypto.subtle.digest('SHA-256',enc.encode(JSON.stringify([w,hashes]))));
       let row=await stmt(env,'SELECT * FROM orders WHERE user_id=? AND request_id=?',String(user.id),requestId).first();
@@ -172,7 +174,9 @@ export default {
         if(!row)fail(429,'RATE','Слишком много заявок. Попробуйте позже.');
       }
       if(row.fingerprint!==fingerprint)fail(409,'CHANGED','Заявка уже передана с другими данными. Создайте новую заявку.');
-      return json(await dispatch(env,row,w,user,photos));
+      const result=await dispatch(env,row,w,user,photos);
+      await statusService.saveContact(env,user,w.phone);
+      return json(result);
     }catch(e){
       // Never log request bodies, Telegram URLs (bot token), or user contact details.
       return json({ok:false,code:e instanceof HttpError?e.code:'INTERNAL',message:e instanceof HttpError?e.message:'Не удалось подтвердить отправку. Данные сохранены; попробуйте позже.'},e instanceof HttpError?e.status:500);

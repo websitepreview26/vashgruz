@@ -19,9 +19,9 @@ function client({live=false,fetcher}={}){
     return new Element();
   }};
   class FakeImage{naturalWidth=3000;naturalHeight=2000;set src(v){this.onload()}}
-  const context={window:{VG_CONFIG:{apiBase:live?'https://api.example':''},...(live?{Telegram:{WebApp:tg}}:{}),addEventListener(){}},document:doc,matchMedia:()=>({matches:false}),localStorage:{getItem:k=>storage.get(k)||null,setItem:(k,v)=>storage.set(k,v)},crypto,FormData,Blob,File,FileReader:class{readAsDataURL(){this.result='data:image/jpeg;base64,original';this.onload()}},Image:FakeImage,AbortSignal,Date,setTimeout,clearTimeout,performance,fetch:fetcher,URL:{createObjectURL(){const u='blob:test-'+(++counter);urls.add(u);return u},revokeObjectURL:u=>urls.delete(u)}};
+  const context={window:{VG_CONFIG:{apiBase:live?'https://api.example':''},...(live?{Telegram:{WebApp:tg}}:{}),addEventListener(){}},document:doc,matchMedia:()=>({matches:false}),localStorage:{getItem:k=>storage.get(k)||null,setItem:(k,v)=>storage.set(k,v)},crypto,FormData,Blob,File,FileReader:class{readAsDataURL(){this.result='data:image/jpeg;base64,original';this.onload()}},Image:FakeImage,AbortSignal,Date,setTimeout,clearTimeout,performance,fetch:(url,opts)=>url.endsWith('/api/contact')?Promise.resolve(Response.json({ok:true,phone:''})):fetcher(url,opts),URL:{createObjectURL(){const u='blob:test-'+(++counter);urls.add(u);return u},revokeObjectURL:u=>urls.delete(u)}};
   vm.createContext(context);vm.runInContext(script,context);
-  return {run:s=>vm.runInContext(s,context),node,storage,context,urls};
+  return {run:s=>vm.runInContext(s,context),node,storage,context,urls,tg};
 }
 test('photo preparation, five-photo limit and session-only drafts',async()=>{
   const c=client();c.run("S.w=newW('trash');render()");
@@ -95,4 +95,23 @@ test('unreadable photo produces a visible error instead of silently keeping empt
  await c.run('addPhotos(files)');assert.equal(c.run('S.w.photos.length'),0);assert.equal(c.run('S.preparing'),false);
  assert.match(c.run('S.photoError'),/JPEG или PNG/);const view=c.node('#view').innerHTML;
  assert(view.indexOf('Фото не удалось открыть')<view.indexOf('class="photo-grid"'));
+});
+
+test('both moving addresses are visible together; next is disabled until both are entered',()=>{
+ const c=client();c.run("S.w=newW('flat');S.step=1;render()");
+ assert(c.node('#go').disabled);assert.equal(c.node('#go').textContent,'Укажите адрес погрузки');
+ c.run("S.w.addr='Минск, Ленина 1';refresh()");assert(c.node('#go').disabled);assert.equal(c.node('#go').textContent,'Укажите адрес выгрузки');
+ c.run("S.w.to='Минск, Кирова 2';refresh()");assert.equal(c.node('#go').disabled,false);assert.equal(c.node('#go').textContent,'Далее: контакт');
+ const view=c.node('#view').innerHTML;assert(view.indexOf('id="to"')<view.indexOf('На погрузке'));assert.equal(c.run('S.step'),1);
+});
+test('Telegram phone sharing fills contact without a name field and caches number for next order',async()=>{
+ const c=client({live:true});c.tg.requestContact=cb=>cb(true);
+ c.context.fetch=async()=>Response.json({ok:true,phone:'+375291234567',updatedAt:Date.now()});
+ c.run("S.w=newW('trash');S.step=2;render()");assert.match(c.node('#view').innerHTML,/Поделиться номером/);assert(!c.node('#view').innerHTML.includes('id="name"'));
+ await c.run('requestPhone()');assert.equal(c.run('S.w.phone'),'+375291234567');assert.equal(c.run('S.contactBusy'),false);assert.equal(c.node('#go').disabled,false);
+ assert.match(c.node('#view').innerHTML,/Для связи с водителем/);assert.equal(c.run("newW('flat').phone"),'+375291234567');
+});
+test('declining Telegram contact opens manual option without inventing a number',async()=>{
+ const c=client({live:true});c.tg.requestContact=cb=>cb(false);c.run("S.w=newW('trash');S.step=2;render()");
+ await c.run('requestPhone()');assert.equal(c.run('S.w.phone'),'');assert.equal(c.run('S.phoneManual'),true);assert.equal(c.run('S.contactBusy'),false);assert.match(c.node('#view').innerHTML,/id="phone"/);assert(c.node('#go').disabled);
 });

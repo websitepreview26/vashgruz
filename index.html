@@ -192,6 +192,11 @@ body{background:var(--bg)}.app-toolbar{display:flex;align-items:center;justify-c
 .native-photo-picker{position:absolute;left:0;top:0;width:1px;height:1px;opacity:0;pointer-events:none}
 .photo-add{cursor:pointer}.photo-add:focus-visible{outline:none;box-shadow:inset 0 0 0 2px var(--acc)}
 .photo-add[aria-disabled=true]{opacity:.6;cursor:wait}
+
+.share-phone{width:100%;display:flex;align-items:center;justify-content:center;gap:10px;padding:17px;border-radius:16px;background:var(--acc);color:var(--accx);font-weight:600}
+.share-phone:disabled{opacity:.6}.manual-phone{display:block;margin:18px auto 8px;font-size:14px;color:var(--mut);text-decoration:underline}
+.contact-number{display:flex;align-items:center;gap:12px;padding:17px 14px;background:var(--card);border:1px solid var(--line);border-radius:16px}
+.contact-number>span{width:34px;height:34px;display:grid;place-items:center;border-radius:50%;background:#2fb86b20;color:#2fb86b}.contact-number>div{flex:1;min-width:0}.contact-number b{display:block;font-size:16px}.contact-number small{display:block;color:var(--mut);font-size:11px;margin-top:5px}.contact-number button{font-size:12px;color:var(--mut)}
 </style>
 </head>
 <body>
@@ -275,13 +280,13 @@ const fd = (s, long) => !s ? 'По согласованию' : new Date(s+'T12:0
 const user = tg && tg.initDataUnsafe && tg.initDataUnsafe.user;
 const API_BASE=String(window.VG_CONFIG?.apiBase||'').replace(/\/$/,'');
 const photoCache=new Map();
-let S = {tab:'home', w:null, step:0, last:null, sheet:null, cal:null, anim:'', orders:[], errors:{},sending:false,preparing:false,photoError:'',submitError:''};
+let S = {tab:'home', w:null, step:0, last:null, sheet:null, cal:null, anim:'', orders:[], errors:{},sending:false,preparing:false,contactBusy:false,phoneManual:false,contactError:'',photoError:'',submitError:''};
 try {
  const current=localStorage.getItem('vg-requests-v2');
  if(current){const o=JSON.parse(current);if(Array.isArray(o))S.orders=o}
  else {const old=JSON.parse(localStorage.getItem('vg-orders')||'[]');if(Array.isArray(old))S.orders=old.map(o=>({...o,status:'draft',step:0,toFloor:1,toLift:true,slot:Math.max(0,SLOTS.findIndex(s=>s[0]===o.slot))}))}
 } catch(e){}
-const newW = id => ({photos:[],sv:id||'trash',desc:'',addr:'',to:'',floor:1,lift:true,toFloor:1,toLift:true,dis:false,date:'',slot:0,name:user?user.first_name:'',phone:''});
+const newW = id => ({photos:[],sv:id||'trash',desc:'',addr:'',to:'',floor:1,lift:true,toFloor:1,toLift:true,dis:false,date:'',slot:0,name:user?user.first_name:'',phone:cachedPhone()});
 function save(){try{localStorage.setItem('vg-requests-v2',JSON.stringify(S.orders));return true}catch(e){return false}}
 const TABS = [['home','Заказ','truck'],['orders','Заявки','list']];
 $('#tabs').innerHTML = TABS.map(t => `<button data-a="tab" data-v="${t[0]}">${ic(t[2])}${t[1]}</button>`).join('');
@@ -295,7 +300,7 @@ function home(){
  <div class="grid">${SV.map(s=>`<button class="svc" style="--c:${s.c}" data-a="start" data-v="${s.id}"><span class="bg">${ic(s.id)}</span><span class="ib">${ic(s.id)}</span><b>${s.n}</b><small>${s.r?'от '+s.r+' BYN':'по оценке'}</small></button>`).join('')}</div>`;
 }
 const error = key => `<p class="error" id="err-${key}" role="alert">${esc(S.errors[key]||'')}</p>`;
-const addressField=(key,label,placeholder)=>`<label class="field-label" for="${key}">${label}</label><div class="fld ${S.errors[key]?'invalid':''}">${ic('pin')}<input id="${key}" data-f="${key}" maxlength="220" autocomplete="street-address" aria-describedby="err-${key}" aria-invalid="${!!S.errors[key]}" placeholder="${placeholder}" value="${esc(S.w[key])}"></div>${error(key)}`;
+const addressField=(key,label,placeholder)=>`<label class="field-label" for="${key}">${label}</label><div class="fld ${S.errors[key]?'invalid':''}">${ic('pin')}<input id="${key}" data-f="${key}" maxlength="220" autocomplete="street-address" aria-describedby="err-${key}" aria-invalid="${!!S.errors[key]}" enterkeyhint="${key==='addr'&&sv(S.w.sv).mv?'next':'done'}" placeholder="${placeholder}" value="${esc(S.w[key])}"></div>${error(key)}`;
 function conditions(prefix,title){const w=S.w,f=prefix?'toFloor':'floor',l=prefix?'toLift':'lift';return `<p class="conditions-title">${title}</p><div class="card conditions"><div class="rw"><span>Этаж</span><div class="stp"><button data-a="fl" data-k="${f}" data-v="-1" aria-label="Уменьшить этаж" ${w[f]<=1?'disabled':''}>−</button><b>${w[f]}</b><button data-a="fl" data-k="${f}" data-v="1" aria-label="Увеличить этаж" ${w[f]>=50?'disabled':''}>+</button></div></div><div class="rw"><span>Есть лифт</span><button class="sw" role="switch" aria-checked="${w[l]}" aria-label="Есть лифт: ${title}" data-a="tgl" data-k="${l}"></button></div></div>`}
 function wizard(){
  const w=S.w,s=sv(w.sv),seg=[0,1,2].map(i=>`<i class="${i<=S.step?'on':''}"></i>`).join('');
@@ -305,16 +310,16 @@ function wizard(){
  <label class="field-label" for="desc">Что и примерно сколько? <span style="font-weight:400;color:var(--mut)">· необязательно</span></label><div class="card input-card"><textarea id="desc" class="task-input" data-f="desc" maxlength="1000" aria-describedby="err-desc" aria-invalid="${!!S.errors.desc}" placeholder="${s.ph}">${esc(w.desc)}</textarea></div>${error('desc')}
  <div class="sec"><b>Фото</b><small role="status">${(w.photos||[]).length?'Добавлено: '+w.photos.length+' из 5':'необязательно · до 5'}</small></div><p class="error" id="photo-error" role="alert">${esc(S.photoError)}</p><div class="photo-grid">${(w.photos||[]).map((p,i)=>`<div class="photo-item"><img src="${p.url}" alt="Фото ${i+1}"><button data-a="remove-photo" data-v="${i}" aria-label="Удалить фото ${i+1}">${ic('x')}</button></div>`).join('')}${(w.photos||[]).length<5?`<label class="photo-add" for="photo-input" role="button" tabindex="0" aria-disabled="${S.preparing}">${ic('cam')}<span>${S.preparing?'Подготовка…':'Добавить'}</span></label>`:''}</div>`;
  if(S.step===1)return bar+`<div class="hd"><h1>${s.mv?'Откуда и куда?':'Куда приехать?'}</h1><p class="sub">Адрес и удобное время.</p></div>
- ${addressField('addr',s.mv?'Адрес погрузки':'Адрес','Улица, дом, населённый пункт')}${conditions('',s.mv?'На погрузке':'Условия на месте')}
- ${s.mv?addressField('to','Адрес выгрузки','Улица, дом, населённый пункт')+conditions('to','На выгрузке'):''}
+ ${addressField('addr',s.mv?'Адрес погрузки':'Адрес','Улица, дом, населённый пункт')}
+ ${s.mv?addressField('to','Адрес выгрузки','Улица, дом, населённый пункт'):''}
+ ${conditions('',s.mv?'На погрузке':'Условия на месте')}${s.mv?conditions('to','На выгрузке'):''}
  <div class="card conditions" style="margin-top:10px"><div class="rw"><span>Нужна разборка</span><button class="sw" role="switch" aria-checked="${w.dis}" aria-label="Нужна разборка" data-a="tgl" data-k="dis"></button></div></div>
  <div class="sec"><b>Когда удобно?</b><small>Можно уточнить позже</small></div>${error('date')}
  <div class="days"><button class="day" style="width:103px" data-a="day" data-v="" aria-pressed="${!w.date}"><small>Уточним</small><b style="font-size:14px">Позже</b></button>${Array.from({length:5},(_,i)=>plus(i)).map((d,i)=>`<button class="day" data-a="day" data-v="${iso(d)}" aria-pressed="${iso(d)===w.date}"><small>${i===0?'Сегодня':i===1?'Завтра':d.toLocaleDateString('ru-RU',{weekday:'short'})}</small><b>${d.getDate()}</b></button>`).join('')}</div>
  <button class="fld" data-a="sheet" data-v="cal">${ic('cal')}<span class="v">${w.date?esc(fd(w.date)):'Выбрать другую дату'}</span>${ic('chev')}</button>
  ${w.date?`<div class="slots">${SLOTS.map((t,i)=>`<button class="slot" data-a="slot" data-v="${i}" aria-pressed="${i===w.slot}">${ic(t[2])}<span><b>${t[0]}</b><small>${t[1]}</small></span></button>`).join('')}</div>`:''}`;
  return bar+`<div class="hd"><h1>Контакт</h1><p class="sub">Для согласования стоимости.</p></div>
- <label class="field-label" for="phone">Телефон</label><div class="fld ${S.errors.phone?'invalid':''}">${ic('phone')}<input id="phone" data-f="phone" type="tel" inputmode="tel" autocomplete="tel" maxlength="25" aria-describedby="err-phone" aria-invalid="${!!S.errors.phone}" placeholder="+375 __ ___-__-__" value="${esc(w.phone)}"></div>${error('phone')}
- <label class="field-label" for="name">Имя <span style="font-weight:400;color:var(--mut)">· необязательно</span></label><div class="fld">${ic('user')}<input id="name" data-f="name" autocomplete="given-name" maxlength="60" placeholder="Как к вам обращаться" value="${esc(w.name)}"></div>
+ ${contactControl(w)}
  <div class="sec"><b>Ваша задача</b><button class="review-edit" data-a="edit" data-v="0">Изменить</button></div>${ticket(w)}
  <p class="error" role="alert">${esc(S.submitError)}</p>${API_BASE?'':'<p class="fine">Демо-режим: отправка ещё не подключена.</p>'}`;
 }
@@ -405,7 +410,41 @@ function close(){
  sheetFocus=null;
 }
 function validate(){const w=S.w,e={};if(S.step===1){if(w.addr.trim().length<5)e.addr='Укажите улицу, дом и населённый пункт.';if(sv(w.sv).mv&&w.to.trim().length<5)e.to='Укажите адрес выгрузки.';if(w.date&&w.date<today())e.date='Выберите сегодняшнюю или будущую дату.'}if(S.step===2){const digits=w.phone.replace(/\D/g,'');if(!/^(?:375\d{9}|80\d{9})$/.test(digits))e.phone='Введите номер: +375 и 9 цифр, либо 8 0 и 9 цифр.'}return e}
-function refresh(){if(S.w){$('#go').disabled=S.sending||S.preparing;$('#go').textContent=S.sending?'Отправляем…':S.preparing?'Подготавливаем фото…':S.step===2?'Получить расчёт':S.step===0?'Далее: адрес':'Далее: контакт'}}
+function cachedPhone(){try{return localStorage.getItem('vg-phone:'+String(user?.id||'local'))||''}catch{return ''}}
+function cachePhone(phone){try{if(validPhone(phone))localStorage.setItem('vg-phone:'+String(user?.id||'local'),phone)}catch{}}
+function validPhone(phone){return /^\+?[1-9]\d{8,14}$/.test(String(phone||'').replace(/[\s()-]/g,''))}
+function canSharePhone(){return !!(API_BASE&&inTg&&typeof tg.requestContact==='function'&&(!tg.isVersionAtLeast||tg.isVersionAtLeast('6.9')))}
+function contactControl(w){
+ if(validPhone(w.phone)&&!S.phoneManual)return `<div class="contact-number"><span>${ic('check')}</span><div><b>${esc(w.phone)}</b><small>Для связи с водителем</small></div><button data-a="manual-phone">Изменить</button></div>${error('phone')}`;
+ const manual=S.phoneManual||!canSharePhone();
+ return `${canSharePhone()?`<button class="share-phone" data-a="share-phone" ${S.contactBusy?'disabled':''}>${ic('phone')}<span>${S.contactBusy?'Ожидаем номер…':'Поделиться номером'}</span></button><p class="hint">Telegram запросит ваше разрешение.</p>`:''}${manual?`<label class="field-label" for="phone">Телефон</label><div class="fld ${S.errors.phone?'invalid':''}">${ic('phone')}<input id="phone" data-f="phone" type="tel" inputmode="tel" autocomplete="tel" maxlength="25" enterkeyhint="done" aria-describedby="err-phone" aria-invalid="${!!S.errors.phone}" placeholder="+375 __ ___-__-__" value="${esc(w.phone)}"></div>`:'<button class="manual-phone" data-a="manual-phone">Ввести вручную</button>'}${error('phone')}<p class="error" role="alert">${esc(S.contactError)}</p>`;
+}
+async function fetchContact(){
+ const response=await fetch(API_BASE+'/api/contact',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({initData:tg.initData}),signal:AbortSignal.timeout(12000)});
+ const data=await response.json();if(!response.ok||!data.ok)throw Error('contact');return data;
+}
+async function loadContact(){
+ if(!API_BASE||!inTg||!tg.initData)return;
+ try{const data=await fetchContact();if(validPhone(data.phone)){cachePhone(data.phone);if(S.w&&!S.w.phone&&!S.phoneManual&&!S.contactBusy){S.w.phone=data.phone;if(S.step===2)render(true)}}}catch{}
+}
+async function requestPhone(){
+ const w=S.w;if(!w||S.contactBusy||!canSharePhone())return;
+ const requestedAt=Date.now();S.contactBusy=true;S.contactError='';render(true);
+ try{
+  const shared=await new Promise((resolve,reject)=>{const timer=setTimeout(()=>reject(Error('timeout')),45000);try{tg.requestContact(ok=>{clearTimeout(timer);resolve(ok)})}catch(e){clearTimeout(timer);reject(e)}});
+  if(!shared){if(S.w===w)S.phoneManual=true;return}
+  let phone='';
+  for(let i=0;i<10;i++){
+   const data=await fetchContact(),clockOffset=data.serverTime?data.serverTime-Date.now():0;if(validPhone(data.phone)&&data.updatedAt>=requestedAt+clockOffset-1500){phone=data.phone;break}
+   await new Promise(resolve=>setTimeout(resolve,600));
+  }
+  if(!phone)throw Error('pending');
+  cachePhone(phone);if(S.w===w){w.phone=phone;S.phoneManual=false;delete S.errors.phone;storeDraft()}
+ }catch{if(S.w===w){S.phoneManual=true;S.contactError='Не удалось получить номер. Можно ввести его вручную.'}}
+ finally{S.contactBusy=false;if(S.w)render(true)}
+}
+function missingAddress(){if(!S.w||S.step!==1)return '';if(S.w.addr.trim().length<5)return sv(S.w.sv).mv?'Укажите адрес погрузки':'Укажите адрес';if(sv(S.w.sv).mv&&S.w.to.trim().length<5)return 'Укажите адрес выгрузки';return ''}
+function refresh(){if(S.w){const missing=missingAddress(),needsPhone=S.step===2&&!validPhone(S.w.phone);$('#go').disabled=S.sending||S.preparing||S.contactBusy||!!missing||needsPhone;$('#go').textContent=S.sending?'Отправляем…':S.preparing?'Подготавливаем фото…':S.contactBusy?'Ожидаем номер…':missing|| (needsPhone?'Укажите номер':S.step===2?'Получить расчёт':S.step===0?'Далее: адрес':'Далее: контакт')}}
 function storeDraft(status='draft'){
  const w=S.w;if(!w)return null;
  const id=w.id||String(Date.now()),photos=w.photos||[];w.photoCount=photos.length;
@@ -415,7 +454,7 @@ function storeDraft(status='draft'){
  S.w.id=id;save();return o;
 }
 async function submitOrder(){
- const w=S.w;if(!w||S.sending||S.preparing)return;
+ const w=S.w;if(!w||S.sending||S.preparing||S.contactBusy)return;
  if(!API_BASE){const o=storeDraft('demo');S.last=o;S.w=null;S.tab='done';S.anim='af';return render()}
  if(!inTg||!tg.initData){S.submitError='Для отправки откройте мини-приложение через бота в Telegram.';return render()}
  w.submitId=w.submitId||crypto.randomUUID();storeDraft();
@@ -428,13 +467,13 @@ async function submitOrder(){
   const response=await fetch(API_BASE+'/api/orders',{method:'POST',body:form,signal:AbortSignal.timeout(90000)});
   const result=await response.json();
   if(!response.ok||!result.ok)throw new Error(result.message||'Не удалось отправить. Попробуйте ещё раз.');
-  const o=storeDraft('sent');o.serverId=result.id;o.businessStatus=result.businessStatus||'received';o.statusUpdatedAt=result.statusUpdatedAt||Date.now();lastStatusFetch=0;save();
+  cachePhone(w.phone);const o=storeDraft('sent');o.serverId=result.id;o.businessStatus=result.businessStatus||'received';o.statusUpdatedAt=result.statusUpdatedAt||Date.now();lastStatusFetch=0;save();
   S.last=o;S.w=null;S.tab='done';S.anim='af';hap('success');
  }catch(e){S.submitError=e.name==='TimeoutError'||e.name==='TypeError'?'Не удалось подтвердить отправку. Фото и данные сохранены — попробуйте повторно.':e.message}
  finally{S.sending=false;render()}
 }
 $('#go').onclick=()=>{
- if(S.sending||S.preparing)return;
+ if(S.sending||S.preparing||S.contactBusy)return;
  if(!S.w){if(S.tab==='done'){S.tab='orders';render()}return}
  S.errors=validate();if(Object.keys(S.errors).length){render();const first=Object.keys(S.errors)[0];$('#'+first)?.focus();return}
  hap();if(S.step<2){storeDraft();S.step++;S.anim='af';return render()}return submitOrder();
@@ -489,10 +528,12 @@ async function addPhotos(files){
 function render(preserve=false){edgeBack.cancel();const oldScroll=$('#view').scrollTop;const wiz=!!S.w,v=$('#view');const active=document.activeElement;if(active&&v.contains(active)&&active.matches('input,textarea,select'))active.blur();v.className=S.anim;S.anim='';v.innerHTML=wiz?wizard():({home,orders,done}[S.tab]||home)();v.scrollTop=preserve?oldScroll:0;if(!preserve)v.focus({preventScroll:true});$('#dock').hidden=!wiz&&S.tab!=='done';$('#tabs').hidden=wiz||S.tab==='done';if(!wiz&&S.tab==='done')$('#go').textContent='Мои заявки';document.querySelectorAll('#tabs button').forEach(b=>b.setAttribute('aria-current',b.dataset.v===S.tab));if(inTg)(wiz||S.tab==='done')?tg.BackButton.show():tg.BackButton.hide();if(wiz)refresh();$('#view').inert=S.sending;scheduleStatuses()}
 const keep=fn=>{const y=$('#view').scrollTop;fn();render();$('#view').scrollTop=y};
 document.addEventListener('click',e=>{const b=e.target.closest('[data-a]');if(!b)return;const a=b.dataset.a,v=b.dataset.v,k=b.dataset.k,w=S.w;if(S.sending||S.preparing)return;hap();
+ if(a==='share-phone')return requestPhone();
+ if(a==='manual-phone'){S.phoneManual=true;S.contactError='';return render(true)}
  if(a==='refresh-orders'){lastStatusFetch=0;return syncOrders()}
  if(a==='tab'){if(v==='orders')lastStatusFetch=0;S.tab=v;S.anim='af';return render()}
- if(a==='start'){S.submitError='';S.photoError='';S.w=newW(v);S.step=0;S.errors={};S.anim='af';return render()}
- if(a==='again'||a==='open-request'){const o=S.orders.find(x=>x.id===v);if(!o)return;if(a==='open-request'&&o.status!=='draft'){S.last=o;S.tab='done';return render()}const cached=a==='again'?[]:photoCache.get(o.id)||[];S.photoError=a!=='again'&&o.photoCount&&!cached.length?'Фото из черновика нужно добавить заново.':'';S.submitError='';S.w={...newW(o.sv),...o,...(a==='again'?{id:null,serverId:null,submitId:null,businessStatus:null,history:[],statusUpdatedAt:null,date:'',slot:0}: {}),photos:cached};S.step=a==='again'?0:Math.min(o.step||0,2);S.errors={};return render()}
+ if(a==='start'){S.phoneManual=false;S.contactError='';S.submitError='';S.photoError='';S.w=newW(v);S.step=0;S.errors={};S.anim='af';return render()}
+ if(a==='again'||a==='open-request'){const o=S.orders.find(x=>x.id===v);if(!o)return;if(a==='open-request'&&o.status!=='draft'){S.last=o;S.tab='done';return render()}const cached=a==='again'?[]:photoCache.get(o.id)||[];S.photoError=a!=='again'&&o.photoCount&&!cached.length?'Фото из черновика нужно добавить заново.':'';S.submitError='';S.phoneManual=false;S.contactError='';S.w={...newW(o.sv),...o,...(a==='again'?{id:null,serverId:null,submitId:null,businessStatus:null,history:[],statusUpdatedAt:null,date:'',slot:0}: {}),photos:cached};S.step=a==='again'?0:Math.min(o.step||0,2);S.errors={};return render()}
  if(a==='back')return back();
  if(a==='exit'){if(w.desc.trim()||w.addr.trim()||w.phone.trim())storeDraft();S.w=null;S.errors={};S.tab='home';S.anim='ab';return render()}
  if(a==='edit'){S.step=+v;S.errors={};return render()}
@@ -608,6 +649,7 @@ document.addEventListener('keydown',e=>{if(!S.sheet)return;if(e.key==='Escape')r
 document.addEventListener('visibilitychange',()=>{if(!document.hidden)lastStatusFetch=0;scheduleStatuses()});
 if(inTg)tg.onEvent('activated',()=>{lastStatusFetch=0;scheduleStatuses()});
 render();
+void loadContact();
 </script>
 </body>
 </html>

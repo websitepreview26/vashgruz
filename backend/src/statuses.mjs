@@ -36,6 +36,14 @@ export function createStatusService({telegram,stmt,fail}){
       history:events.filter(e=>e.order_id===row.id).map(e=>({status:e.status,at:e.changed_at})).reverse()
     }))};
   }
+  async function contact(request,env,validateInitData){
+    const data=await smallJson(request),user=await validateInitData(data.initData,env.BOT_TOKEN);
+    const row=await stmt(env,'SELECT phone,updated_at FROM customer_contacts WHERE user_id=?',String(user.id)).first();
+    return {ok:true,phone:row?.phone||'',updatedAt:row?.updated_at||0,serverTime:Date.now()};
+  }
+  async function saveContact(env,user,phone){
+    await stmt(env,'INSERT INTO customer_contacts(user_id,phone,first_name,updated_at) VALUES(?,?,?,?) ON CONFLICT(user_id) DO UPDATE SET phone=excluded.phone,first_name=excluded.first_name,updated_at=excluded.updated_at',String(user.id),phone,String(user.first_name||'').slice(0,60),Date.now()).run();
+  }
   async function edit(env,row,message,confirmCancel=false){
     const form=new FormData();form.set('chat_id',env.TELEGRAM_CHAT_ID);form.set('message_id',String(row.message_id));
     form.set('reply_markup',JSON.stringify(statusKeyboard(row,confirmCancel)));
@@ -47,7 +55,15 @@ export function createStatusService({telegram,stmt,fail}){
   }
   async function webhook(request,env){
     if(!secretMatches(request.headers.get('X-Telegram-Bot-Api-Secret-Token'),env.TELEGRAM_WEBHOOK_SECRET))fail(403,'WEBHOOK','Доступ запрещён.');
-    const update=await smallJson(request),q=update.callback_query;
+    const update=await smallJson(request),q=update.callback_query,message=update.message;
+    if(message?.contact){
+      const sender=message.from,c=message.contact;
+      if(message.chat?.type==='private'&&Number.isSafeInteger(sender?.id)&&sender.id>0&&String(message.chat.id)===String(sender.id)&&c.user_id===sender.id){
+        const digits=String(c.phone_number||'').replace(/\D/g,'');
+        if(/^[1-9]\d{8,14}$/.test(digits))await saveContact(env,sender,'+'+digits);
+      }
+      return {ok:true};
+    }
     if(!q)return {ok:true};
     if(typeof q.id!=='string'||q.id.length>128)return {ok:true};
     const answer=async text=>{const f=new FormData();f.set('callback_query_id',q.id);f.set('text',text);try{await telegram(env,'answerCallbackQuery',f)}catch{}};
@@ -99,10 +115,10 @@ export function createStatusService({telegram,stmt,fail}){
     const setupTelegram=async(method,form)=>{try{return await telegram(env,method,form)}catch(e){fail(502,'TELEGRAM_SETUP','Не удалось настроить '+method+': '+(e.safeDiagnostic||e.code||'ошибка Telegram'))}};
     const old=await setupTelegram('getWebhookInfo',new FormData());
     if(old.url&&old.url!==url)fail(409,'EXISTING_WEBHOOK','У бота уже другой webhook. Он не изменён.');
-    const form=new FormData();form.set('url',url);form.set('secret_token',env.TELEGRAM_WEBHOOK_SECRET);form.set('allowed_updates',JSON.stringify(['callback_query']));form.set('drop_pending_updates','false');
+    const form=new FormData();form.set('url',url);form.set('secret_token',env.TELEGRAM_WEBHOOK_SECRET);form.set('allowed_updates',JSON.stringify(['callback_query','message']));form.set('drop_pending_updates','false');
     await setupTelegram('setWebhook',form);
     const info=await setupTelegram('getWebhookInfo',new FormData());
     return {ok:true,webhook:info.url===url,pending:info.pending_update_count||0};
   }
-  return {received,list,webhook,setup};
+  return {received,list,contact,saveContact,webhook,setup};
 }
