@@ -1,5 +1,6 @@
 {
   "name": "vashgruz-api",
+  "account_id": "329067336d53aef4d14658005b3aae45",
   "main": "src/worker.mjs",
   "compatibility_date": "2026-10-25",
   "workers_dev": true,
@@ -9,7 +10,7 @@
   "d1_databases": [{
     "binding": "DB",
     "database_name": "vashgruz-orders",
-    "database_id": "REPLACE_WITH_DATABASE_ID",
+    "database_id": "e503428e-c384-4ad3-adb7-08e833ba4fa3",
     "migrations_dir": "migrations"
   }],
   "observability": { "enabled": false }
