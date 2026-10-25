@@ -15,11 +15,11 @@ function client({live=false,fetcher}={}){
   const node=k=>{if(!nodes.has(k))nodes.set(k,new Element());return nodes.get(k)};
   const tg={initData:'signed-test-data',platform:'ios',colorScheme:'light',initDataUnsafe:{user:{id:42,first_name:'Тест'}},ready(){},expand(){},disableVerticalSwipes(){},setHeaderColor(){},setBackgroundColor(){},setBottomBarColor(){},onEvent(){},MainButton:{hide(){}},BackButton:{onClick(){},hide(){},show(){}},HapticFeedback:{selectionChanged(){},notificationOccurred(){}}};
   const doc={querySelector:node,querySelectorAll:()=>[],addEventListener(){},documentElement:{dataset:{},style:{setProperty(){}},classList:{add(){}}},createElement(name){
-    if(name==='canvas')return {width:0,height:0,getContext:()=>({fillRect(){},drawImage(){}}),toBlob:cb=>cb(new Blob([new Uint8Array([255,216,255,224,255,217])],{type:'image/jpeg'}))};
+    if(name==='canvas')return {width:0,height:0,getContext:()=>({fillRect(){},drawImage(){}}),toDataURL:()=> 'data:image/jpeg;base64,preview',toBlob:cb=>cb(new Blob([new Uint8Array([255,216,255,224,255,217])],{type:'image/jpeg'}))};
     return new Element();
   }};
   class FakeImage{naturalWidth=3000;naturalHeight=2000;set src(v){this.onload()}}
-  const context={window:{VG_CONFIG:{apiBase:live?'https://api.example':''},...(live?{Telegram:{WebApp:tg}}:{}),addEventListener(){}},document:doc,matchMedia:()=>({matches:false}),localStorage:{getItem:k=>storage.get(k)||null,setItem:(k,v)=>storage.set(k,v)},crypto,FormData,Blob,File,Image:FakeImage,AbortSignal,Date,setTimeout,clearTimeout,performance,fetch:fetcher,URL:{createObjectURL(){const u='blob:test-'+(++counter);urls.add(u);return u},revokeObjectURL:u=>urls.delete(u)}};
+  const context={window:{VG_CONFIG:{apiBase:live?'https://api.example':''},...(live?{Telegram:{WebApp:tg}}:{}),addEventListener(){}},document:doc,matchMedia:()=>({matches:false}),localStorage:{getItem:k=>storage.get(k)||null,setItem:(k,v)=>storage.set(k,v)},crypto,FormData,Blob,File,FileReader:class{readAsDataURL(){this.result='data:image/jpeg;base64,original';this.onload()}},Image:FakeImage,AbortSignal,Date,setTimeout,clearTimeout,performance,fetch:fetcher,URL:{createObjectURL(){const u='blob:test-'+(++counter);urls.add(u);return u},revokeObjectURL:u=>urls.delete(u)}};
   vm.createContext(context);vm.runInContext(script,context);
   return {run:s=>vm.runInContext(s,context),node,storage,context,urls};
 }
@@ -31,7 +31,7 @@ test('photo preparation, five-photo limit and session-only drafts',async()=>{
   assert.match(c.run('S.photoError'),/до 5/);
   const draft=JSON.parse(c.storage.get('vg-requests-v2'))[0];
   assert.equal(draft.photoCount,5);assert.deepEqual(draft.photos,[]);assert(!c.storage.get('vg-requests-v2').includes('blob:'));
-  assert.equal(c.urls.size,5);assert.match(c.node('#view').innerHTML,/Фото 5/);
+  assert.equal(c.urls.size,0);assert.match(c.node('#view').innerHTML,/Фото 5/);
 });
 test('empty description can advance without selecting a field',()=>{
   const c=client();c.run("S.w=newW('trash');S.step=0;render()");
@@ -70,4 +70,29 @@ test('status fetch failure keeps last known state instead of fabricating progres
  const c=client({live:true,fetcher:async()=>{throw Error('offline')}});
  c.run("S.orders=[{id:'local',serverId:'VG-TEST',sv:'trash',status:'sent',businessStatus:'received',date:'',desc:'Диван'}];S.tab='orders'");
  await c.run('syncOrders()');assert.equal(c.run('S.orders[0].businessStatus'),'received');assert.match(c.node('#view').innerHTML,/Не удалось обновить статусы/);
+});
+
+test('native picker event adds thumbnails and resets input so the same file can be selected again',async()=>{
+ const c=client();c.run("S.w=newW('flat');render()");
+ const input=c.node('#photo-input'),handler=input.listeners.change;
+ input.files=[new File(['image'],'iphone.jpg',{type:'image/jpeg'})];input.value='C:\\fakepath\\iphone.jpg';
+ await handler({currentTarget:input});
+ assert.equal(input.value,'');assert.equal(c.run('S.w.photos.length'),1);
+ assert.match(c.node('#view').innerHTML,/Добавлено: 1 из 5/);assert.match(c.node('#view').innerHTML,/<img src="data:image\/jpeg;base64,preview"/);
+ c.run('render()');assert.equal(input.listeners.change,handler);
+ await handler({currentTarget:input});assert.equal(c.run('S.w.photos.length'),2);
+ assert.equal((html.match(/id="photo-input"/g)||[]).length,1);
+ assert(html.indexOf('id="photo-input"')<html.indexOf('<script>'));
+});
+test('iOS image can fall back to data URL decoding and tolerate missing MIME metadata',async()=>{
+ const c=client();c.context.Image=class{naturalWidth=2000;naturalHeight=1500;set src(v){v.startsWith('blob:')?this.onerror():this.onload()}};
+ c.run("S.w=newW('trash');render()");c.context.files=[new File(['image'],'iphone.jpg',{type:''})];
+ await c.run('addPhotos(files)');assert.equal(c.run('S.w.photos.length'),1);assert.equal(c.run('S.photoError'),'');assert.equal(c.urls.size,0);
+});
+test('unreadable photo produces a visible error instead of silently keeping empty picker',async()=>{
+ const c=client();c.context.Image=class{set src(v){this.onerror()}};
+ c.run("S.w=newW('trash');render()");c.context.files=[new File(['bad'],'image.heic',{type:'image/heic'})];
+ await c.run('addPhotos(files)');assert.equal(c.run('S.w.photos.length'),0);assert.equal(c.run('S.preparing'),false);
+ assert.match(c.run('S.photoError'),/JPEG или PNG/);const view=c.node('#view').innerHTML;
+ assert(view.indexOf('Фото не удалось открыть')<view.indexOf('class="photo-grid"'));
 });

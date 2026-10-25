@@ -188,11 +188,16 @@ body{background:var(--bg)}.app-toolbar{display:flex;align-items:center;justify-c
 .order-progress .reached i{background:var(--acc);border-color:var(--acc)}.order-progress .reached:not(.current):after{background:var(--acc)}
 .order-progress b{display:block;font-size:9px;font-weight:500;color:var(--mut)}.order-progress .reached b{color:var(--ink)}.order-progress small{display:block;font-size:8px;color:var(--mut);line-height:1.5;margin-top:5px}
 .status-updated{display:block;font-size:11px;color:var(--mut)}.cancelled h2,.status.cancelled{color:#cf6559}.sync-note{display:block;font-size:12px;color:var(--mut);padding:0 3px 15px;text-align:left}
+
+.native-photo-picker{position:absolute;left:0;top:0;width:1px;height:1px;opacity:0;pointer-events:none}
+.photo-add{cursor:pointer}.photo-add:focus-visible{outline:none;box-shadow:inset 0 0 0 2px var(--acc)}
+.photo-add[aria-disabled=true]{opacity:.6;cursor:wait}
 </style>
 </head>
 <body>
 <div id="app">
   <main id="view" tabindex="-1"></main>
+  <input id="photo-input" class="native-photo-picker" tabindex="-1" type="file" accept="image/*" multiple aria-label="Добавить фотографии">
   <div class="dock" id="dock" hidden><button id="go"></button></div>
   <nav class="tabs" id="tabs"></nav>
   <div id="layer"><div class="scrim" data-a="close"></div><div class="sheet" id="sheet" role="dialog" aria-modal="true" aria-hidden="true" inert></div></div>
@@ -298,7 +303,7 @@ function wizard(){
  if(S.step===0)return bar+`<div class="hd"><h1>${s.q}</h1><p class="sub">Коротко: что и сколько.</p></div>
  <button class="pill" style="--c:${s.c}" data-a="sheet" data-v="svc"><span class="ib sm">${ic(s.id)}</span><b>${s.n}</b><em>Изменить</em></button>
  <label class="field-label" for="desc">Что и примерно сколько? <span style="font-weight:400;color:var(--mut)">· необязательно</span></label><div class="card input-card"><textarea id="desc" class="task-input" data-f="desc" maxlength="1000" aria-describedby="err-desc" aria-invalid="${!!S.errors.desc}" placeholder="${s.ph}">${esc(w.desc)}</textarea></div>${error('desc')}
- <div class="sec"><b>Фото</b><small>необязательно · до 5</small></div><div class="photo-grid">${(w.photos||[]).map((p,i)=>`<div class="photo-item"><img src="${p.url}" alt="Фото ${i+1}"><button data-a="remove-photo" data-v="${i}" aria-label="Удалить фото ${i+1}">${ic('x')}</button></div>`).join('')}${(w.photos||[]).length<5?`<button class="photo-add" data-a="add-photo" ${S.preparing?'disabled':''}>${ic('cam')}<span>${S.preparing?'Подготовка…':'Добавить'}</span></button>`:''}</div><input id="photo-input" type="file" accept="image/*" multiple hidden><p class="error" id="photo-error" role="alert">${esc(S.photoError)}</p>`;
+ <div class="sec"><b>Фото</b><small role="status">${(w.photos||[]).length?'Добавлено: '+w.photos.length+' из 5':'необязательно · до 5'}</small></div><p class="error" id="photo-error" role="alert">${esc(S.photoError)}</p><div class="photo-grid">${(w.photos||[]).map((p,i)=>`<div class="photo-item"><img src="${p.url}" alt="Фото ${i+1}"><button data-a="remove-photo" data-v="${i}" aria-label="Удалить фото ${i+1}">${ic('x')}</button></div>`).join('')}${(w.photos||[]).length<5?`<label class="photo-add" for="photo-input" role="button" tabindex="0" aria-disabled="${S.preparing}">${ic('cam')}<span>${S.preparing?'Подготовка…':'Добавить'}</span></label>`:''}</div>`;
  if(S.step===1)return bar+`<div class="hd"><h1>${s.mv?'Откуда и куда?':'Куда приехать?'}</h1><p class="sub">Адрес и удобное время.</p></div>
  ${addressField('addr',s.mv?'Адрес погрузки':'Адрес','Улица, дом, населённый пункт')}${conditions('',s.mv?'На погрузке':'Условия на месте')}
  ${s.mv?addressField('to','Адрес выгрузки','Улица, дом, населённый пункт')+conditions('to','На выгрузке'):''}
@@ -434,23 +439,41 @@ $('#go').onclick=()=>{
  S.errors=validate();if(Object.keys(S.errors).length){render();const first=Object.keys(S.errors)[0];$('#'+first)?.focus();return}
  hap();if(S.step<2){storeDraft();S.step++;S.anim='af';return render()}return submitOrder();
 };
-async function compressPhoto(file){
- if(!file.type.startsWith('image/')||file.size>25*1024*1024)throw new Error('Выберите фото размером до 25 МБ.');
- const url=URL.createObjectURL(file),image=new Image();
+function readPhotoData(file){
+ return new Promise((resolve,reject)=>{const reader=new FileReader();reader.onload=()=>resolve(reader.result);reader.onerror=()=>reject(new Error('Не удалось прочитать фото. Выберите его ещё раз.'));reader.readAsDataURL(file)});
+}
+async function decodePhoto(file){
+ const image=new Image(),url=URL.createObjectURL(file);
+ const load=source=>new Promise((resolve,reject)=>{
+  const timer=setTimeout(()=>{image.onload=image.onerror=null;reject(new Error('Фото не удалось открыть. Попробуйте JPEG или PNG.'))},12000);
+  image.onload=()=>{clearTimeout(timer);resolve()};image.onerror=()=>{clearTimeout(timer);reject(new Error('Фото не удалось открыть. Попробуйте JPEG или PNG.'))};image.src=source;
+ });
  try{
-  await new Promise((resolve,reject)=>{image.onload=resolve;image.onerror=()=>reject(new Error('Не удалось открыть фото. Попробуйте другой снимок.'));image.src=url});
+  try{await load(url)}catch{await load(await readPhotoData(file))}
   if(!image.naturalWidth||!image.naturalHeight)throw new Error('Не удалось прочитать фото.');
-  let size=1600,blob;
-  for(let i=0;i<3;i++){
-   const scale=Math.min(1,size/Math.max(image.naturalWidth,image.naturalHeight));
-   const canvas=document.createElement('canvas');canvas.width=Math.max(1,Math.round(image.naturalWidth*scale));canvas.height=Math.max(1,Math.round(image.naturalHeight*scale));
-   const ctx=canvas.getContext('2d');ctx.fillStyle='#fff';ctx.fillRect(0,0,canvas.width,canvas.height);ctx.drawImage(image,0,0,canvas.width,canvas.height);
-   blob=await new Promise(resolve=>canvas.toBlob(resolve,'image/jpeg',.78));canvas.width=canvas.height=0;
-   if(blob&&blob.size<=2*1024*1024)break;size=1000-i*250;
-  }
-  if(!blob||blob.size>2*1024*1024)throw new Error('Не удалось уменьшить фото. Выберите другой снимок.');
-  return {blob,url:URL.createObjectURL(blob)};
+  return image;
  }finally{URL.revokeObjectURL(url)}
+}
+async function compressPhoto(file){
+ const imageFile=file.type.startsWith('image/')||(!file.type&&/\.(jpe?g|png|webp|hei[cf])$/i.test(file.name||''));
+ if(!imageFile||file.size>25*1024*1024)throw new Error('Выберите фото размером до 25 МБ.');
+ const image=await decodePhoto(file);let size=1600,blob;
+ for(let i=0;i<3;i++){
+  const scale=Math.min(1,size/Math.max(image.naturalWidth,image.naturalHeight));
+  const canvas=document.createElement('canvas');canvas.width=Math.max(1,Math.round(image.naturalWidth*scale));canvas.height=Math.max(1,Math.round(image.naturalHeight*scale));
+  const ctx=canvas.getContext('2d');if(!ctx)throw new Error('Не удалось подготовить фото.');
+  ctx.fillStyle='#fff';ctx.fillRect(0,0,canvas.width,canvas.height);ctx.drawImage(image,0,0,canvas.width,canvas.height);
+  blob=await new Promise(resolve=>canvas.toBlob(resolve,'image/jpeg',.78));canvas.width=canvas.height=0;
+  if(blob&&blob.size<=2*1024*1024)break;size=1000-i*250;
+ }
+ if(!blob||blob.size>2*1024*1024)throw new Error('Не удалось уменьшить фото. Выберите другой снимок.');
+ // A small data URL keeps the thumbnail stable when iOS suspends the photo picker/WebView.
+ const thumb=document.createElement('canvas'),scale=Math.min(1,320/Math.max(image.naturalWidth,image.naturalHeight));
+ thumb.width=Math.max(1,Math.round(image.naturalWidth*scale));thumb.height=Math.max(1,Math.round(image.naturalHeight*scale));
+ const ctx=thumb.getContext('2d');if(!ctx)throw new Error('Не удалось подготовить миниатюру.');
+ ctx.fillStyle='#fff';ctx.fillRect(0,0,thumb.width,thumb.height);ctx.drawImage(image,0,0,thumb.width,thumb.height);
+ const url=thumb.toDataURL('image/jpeg',.7);thumb.width=thumb.height=0;
+ return {blob,url};
 }
 async function addPhotos(files){
  const w=S.w;if(!w||S.preparing)return;
@@ -459,11 +482,11 @@ async function addPhotos(files){
  try{
   for(const file of files){
    if(w.photos.length>=5){S.photoError='Можно добавить до 5 фотографий.';break}
-   try{const photo=await compressPhoto(file);w.photos.push(photo)}catch(e){S.photoError=e.message}
+   try{const photo=await compressPhoto(file);w.photos.push(photo);if(S.w===w){render(true);$('#view').scrollTop=y}}catch(e){S.photoError=e.message}
   }
  }finally{S.preparing=false;if(S.w===w){storeDraft();render();$('#view').scrollTop=y}}
 }
-function render(preserve=false){edgeBack.cancel();const oldScroll=$('#view').scrollTop;const wiz=!!S.w,v=$('#view');const active=document.activeElement;if(active&&v.contains(active)&&active.matches('input,textarea,select'))active.blur();v.className=S.anim;S.anim='';v.innerHTML=wiz?wizard():({home,orders,done}[S.tab]||home)();v.scrollTop=preserve?oldScroll:0;if(!preserve)v.focus({preventScroll:true});$('#dock').hidden=!wiz&&S.tab!=='done';$('#tabs').hidden=wiz||S.tab==='done';if(!wiz&&S.tab==='done')$('#go').textContent='Мои заявки';document.querySelectorAll('#tabs button').forEach(b=>b.setAttribute('aria-current',b.dataset.v===S.tab));if(inTg)(wiz||S.tab==='done')?tg.BackButton.show():tg.BackButton.hide();if(wiz)refresh();$('#view').inert=S.sending;const pf=$('#photo-input');if(pf)pf.onchange=e=>addPhotos([...e.target.files]);scheduleStatuses()}
+function render(preserve=false){edgeBack.cancel();const oldScroll=$('#view').scrollTop;const wiz=!!S.w,v=$('#view');const active=document.activeElement;if(active&&v.contains(active)&&active.matches('input,textarea,select'))active.blur();v.className=S.anim;S.anim='';v.innerHTML=wiz?wizard():({home,orders,done}[S.tab]||home)();v.scrollTop=preserve?oldScroll:0;if(!preserve)v.focus({preventScroll:true});$('#dock').hidden=!wiz&&S.tab!=='done';$('#tabs').hidden=wiz||S.tab==='done';if(!wiz&&S.tab==='done')$('#go').textContent='Мои заявки';document.querySelectorAll('#tabs button').forEach(b=>b.setAttribute('aria-current',b.dataset.v===S.tab));if(inTg)(wiz||S.tab==='done')?tg.BackButton.show():tg.BackButton.hide();if(wiz)refresh();$('#view').inert=S.sending;scheduleStatuses()}
 const keep=fn=>{const y=$('#view').scrollTop;fn();render();$('#view').scrollTop=y};
 document.addEventListener('click',e=>{const b=e.target.closest('[data-a]');if(!b)return;const a=b.dataset.a,v=b.dataset.v,k=b.dataset.k,w=S.w;if(S.sending||S.preparing)return;hap();
  if(a==='refresh-orders'){lastStatusFetch=0;return syncOrders()}
@@ -474,8 +497,7 @@ document.addEventListener('click',e=>{const b=e.target.closest('[data-a]');if(!b
  if(a==='exit'){if(w.desc.trim()||w.addr.trim()||w.phone.trim())storeDraft();S.w=null;S.errors={};S.tab='home';S.anim='ab';return render()}
  if(a==='edit'){S.step=+v;S.errors={};return render()}
  if(a==='edit-last'){S.submitError='';S.w={...S.last,photos:photoCache.get(S.last.id)||[]};S.step=0;S.errors={};return render()}
- if(a==='add-photo'){return $('#photo-input')?.click()}
- if(a==='remove-photo'){const p=w.photos.splice(+v,1)[0];if(p)URL.revokeObjectURL(p.url);storeDraft();return keep(()=>{})}
+ if(a==='remove-photo'){const p=w.photos.splice(+v,1)[0];if(p?.url.startsWith('blob:'))URL.revokeObjectURL(p.url);storeDraft();return keep(()=>{})}
  if(a==='sheet')return openSheet(v);
  if(a==='close')return close();
  if(a==='mo'){const d=new Date(S.cal.y,S.cal.m + +v,1);S.cal={y:d.getFullYear(),m:d.getMonth()};$('#sheet').innerHTML=sheetHTML()+'<button class="btn2" data-a="close">Закрыть</button>';return}
@@ -575,6 +597,12 @@ const edgeBack=(()=>{
  document.addEventListener('visibilitychange',()=>{if(document.hidden)cancel()});
  return {cancel};
 })();
+$('#photo-input').addEventListener('change',e=>{
+ const files=Array.from(e.currentTarget.files||[]);e.currentTarget.value='';
+ if(files.length)return addPhotos(files);
+});
+document.addEventListener('click',e=>{if(e.target.closest('.photo-add')&&(S.preparing||S.sending))e.preventDefault()},true);
+document.addEventListener('keydown',e=>{if((e.key==='Enter'||e.key===' ')&&e.target.matches('.photo-add')&&!S.preparing&&!S.sending){e.preventDefault();$('#photo-input').click()}});
 document.addEventListener('input',e=>{const f=e.target.dataset.f;if(f&&S.w){S.w[f]=e.target.value;if(S.errors[f]){delete S.errors[f];$('#err-'+f).textContent='';e.target.setAttribute('aria-invalid','false');e.target.closest('.fld')?.classList.remove('invalid')}refresh()}});
 document.addEventListener('keydown',e=>{if(!S.sheet)return;if(e.key==='Escape')return close();if(e.key==='Tab'){const items=[...document.querySelectorAll('#sheet button:not(:disabled), #sheet a')];const first=items[0],last=items[items.length-1];if(e.shiftKey&&document.activeElement===first){e.preventDefault();last.focus()}else if(!e.shiftKey&&document.activeElement===last){e.preventDefault();first.focus()}}});
 document.addEventListener('visibilitychange',()=>{if(!document.hidden)lastStatusFetch=0;scheduleStatuses()});
