@@ -2,7 +2,7 @@
 <html lang="ru">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Ваш Груз</title>
 <script src="https://telegram.org/js/telegram-web-app.js"></script>
 <style>
@@ -108,24 +108,78 @@ textarea{width:100%;display:block;min-height:76px;padding:12px 0;border:0;backgr
 .cal-g button{width:42px;height:42px;margin:0 auto;border-radius:50%;font-size:16px}
 .cal-g .now{color:var(--acc);font-weight:700}.cal-g .sel{background:var(--navy);color:#fff;font-weight:700}.cal-g button:disabled{opacity:.3}
 a{color:inherit;text-decoration:none}
-button:focus-visible,input:focus-visible,textarea:focus-visible,summary:focus-visible{outline:2px solid var(--acc);outline-offset:2px}
+input:focus,input:focus-visible,textarea:focus,textarea:focus-visible{outline:none;box-shadow:none}
+button:focus-visible,a:focus-visible,summary:focus-visible{outline:none;box-shadow:inset 0 0 0 2px var(--acc)}
+.tabs button{border-radius:12px}
+.input-card:focus-within{box-shadow:0 0 0 2px var(--acc)}
+.input-card:has(textarea[aria-invalid=true]),.fld.invalid:focus-within{box-shadow:0 0 0 2px #c74731}
 [hidden]{display:none!important}
 @media(prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
+
+.field-label{display:block;font-size:13px;font-weight:600;margin:16px 4px 8px}.field-label:first-child{margin-top:0}
+.error{color:#c74731;font-size:13px;margin:6px 4px 14px;line-height:1.4}.error:empty{display:none}
+.fld.invalid{box-shadow:0 0 0 2px #c74731}.task-input{min-height:112px}.hint{font-size:13px;color:var(--mut);line-height:1.5;margin:10px 4px}
+.step-label{font-size:12px;color:var(--mut);margin:0 2px 12px}.conditions{font-size:14px}.conditions-title{font-size:13px;color:var(--mut);margin:18px 4px 8px}
+.review-edit{font-size:13px;color:var(--mut);text-decoration:underline}.status{display:inline-block;font-size:12px;color:var(--mut);background:var(--bg);border-radius:8px;padding:6px 9px;margin-top:12px}
+.ticket .r b{overflow-wrap:anywhere;min-width:0}.ticket .r span{flex-shrink:0}.photo-link{justify-content:flex-start;padding:0 14px;font-size:14px}.privacy{text-decoration:underline}.hrow h1{font-size:32px}.dock button{font-size:16px}
+
+/* Application surfaces */
+:root{--sh:none;--bg:#f3f4f6;--acc:#ffbf16}
+body{background:#e4e7ec}.app-toolbar{display:flex;align-items:center;justify-content:space-between;height:54px;margin-bottom:20px}.app-brand{display:flex;align-items:center;gap:10px;font-size:19px;font-weight:750;letter-spacing:-.5px}.app-brand>span{width:35px;height:35px;display:grid;place-items:center;background:var(--acc);color:var(--accx);border-radius:11px}.app-city{font-size:12px;color:var(--mut);display:flex;align-items:center;gap:3px}.app-city svg{width:14px;height:14px}.hrow{margin:0 0 18px}.hrow h1{font-size:26px}.grid{gap:10px}.svc{min-height:119px;padding:15px;border-radius:18px;background:var(--card);border:1px solid var(--line);box-shadow:none}.svc .bg{display:none}.svc .ib{width:36px;height:36px;border-radius:11px;margin-bottom:12px}.svc .ib svg{width:21px;height:21px}.svc b{font-size:15px;letter-spacing:-.2px}.svc small{font-size:11px;margin-top:4px}.quick-row{display:flex;align-items:center;gap:12px;width:100%;background:var(--card);padding:14px;border-radius:17px;text-align:left;margin-top:12px;border:1px solid var(--line)}.quick-row>svg:first-child{color:var(--mut);width:22px}.quick-row>div{flex:1}.quick-row b{font-size:14px;font-weight:600;display:block}.quick-row small{font-size:12px;color:var(--mut);display:block;margin-top:3px}.quick-row>svg:last-child{width:17px;color:var(--mut)}.resume{background:var(--navy);color:white;border:0;margin:0 0 18px}.resume small{color:#a8b4c2}.resume>svg{color:var(--acc)!important}.sec{margin-top:20px}.sec b{font-size:16px}.card,.fld,.pill,.vol,.slot,.day,.ticket,.ord,.bar button{box-shadow:none}.card,.fld,.pill,.ticket,.ord{border:1px solid var(--line);border-radius:16px}.fld{height:54px}.bar{position:sticky;top:calc(-14px - env(safe-area-inset-top,0px));z-index:3;padding:10px 0;background:var(--bg);margin:0 0 7px;gap:16px}.bar .seg{gap:6px}.bar .seg i{height:3px}.bar button{width:34px;height:34px;background:transparent}.bar button svg{width:22px}.step-label{font-size:11px;margin-bottom:16px}.hd{margin-bottom:18px}.hd h1{font-size:26px}.sub{font-size:14px}.field-label{font-size:12px}.pill{padding:8px 12px}.pill b{font-size:13px}.pill em{font-size:12px}.task-input{min-height:130px;font-size:16px;line-height:1.6}.dock{padding-top:10px;padding-bottom:calc(10px + env(safe-area-inset-bottom,0px));background:var(--bg);backdrop-filter:none}.dock button{height:52px;border-radius:15px}.tabs{padding-top:10px;padding-bottom:calc(10px + env(safe-area-inset-bottom,0px));background:var(--card);backdrop-filter:none}.tabs button{gap:5px;font-size:10px}.tabs button svg{width:22px;height:22px}.tabs button[aria-current=true]{color:var(--ink)}.tabs button[aria-current=true] svg{color:var(--ink)}.sheet{border-radius:24px 24px 0 0}.ticket .r{font-size:13px;padding:11px 14px}.ticket .tot{border-top:1px solid var(--line);margin-top:0;background:var(--card)}.app-status{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--mut);margin-bottom:15px}.app-status i{width:7px;height:7px;border-radius:50%;background:var(--acc)}.contact-note{display:flex;align-items:center;gap:8px;color:var(--mut);font-size:12px;margin:16px 3px 0}.contact-note svg{width:15px;height:15px}.app-receipt-head{display:flex;align-items:center;justify-content:space-between;margin:12px 0 20px}.app-receipt-head h1{font-size:25px}.app-receipt-head button{color:var(--mut);font-size:13px}.order-foot{display:flex;align-items:center;justify-content:space-between;margin-top:13px}.order-foot .btn2{width:auto;padding:0 14px;height:38px;margin:0;font-size:13px}.order-foot .review-edit{font-size:12px}.conditions-title{font-size:12px}.rw{min-height:51px}.day{border-radius:14px}.slot{border-radius:14px;border:1px solid var(--line)}.slot[aria-pressed=true]{border:1px solid var(--acc);box-shadow:inset 0 0 0 1px var(--acc)}
+
+/* System safe area and Telegram's floating controls occupy separate regions. */
+:root{
+ --app-safe-top:max(env(safe-area-inset-top,0px),var(--tg-safe-area-inset-top,var(--vg-safe-top,0px)));
+ --app-safe-bottom:max(env(safe-area-inset-bottom,0px),var(--tg-safe-area-inset-bottom,var(--vg-safe-bottom,0px)));
+ --app-content-top:var(--tg-content-safe-area-inset-top,var(--vg-content-top,0px));
+ --app-content-bottom:var(--tg-content-safe-area-inset-bottom,var(--vg-content-bottom,0px));
+ --app-safe-left:calc(max(env(safe-area-inset-left,0px),var(--tg-safe-area-inset-left,var(--vg-safe-left,0px))) + var(--tg-content-safe-area-inset-left,var(--vg-content-left,0px)));
+ --app-safe-right:calc(max(env(safe-area-inset-right,0px),var(--tg-safe-area-inset-right,var(--vg-safe-right,0px))) + var(--tg-content-safe-area-inset-right,var(--vg-content-right,0px)));
+}
+#app{padding:calc(var(--app-safe-top) + var(--app-content-top)) var(--app-safe-right) 0 var(--app-safe-left)}
+#view{min-height:0;padding:14px 16px 24px}
+.bar{top:-14px}
+.tabs,.dock{padding-bottom:calc(10px + var(--app-safe-bottom) + var(--app-content-bottom))}
+.sheet{padding-bottom:calc(22px + var(--app-safe-bottom) + var(--app-content-bottom));padding-left:calc(16px + var(--app-safe-left));padding-right:calc(16px + var(--app-safe-right));max-height:calc(100% - var(--app-safe-top) - var(--app-content-top) - 12px)}
+.hrow{margin:6px 0 0}.hrow h1{font-size:30px;line-height:1.1;letter-spacing:-.025em}
+.home-section{margin:28px 2px 12px}.home-section b{font-size:18px}.home-section small{font-size:14px}
+.grid{gap:12px}.svc{min-height:138px;border:0;border-radius:22px;padding:14px;background:linear-gradient(150deg,color-mix(in srgb,var(--c) 20%,var(--card)),var(--card) 70%);box-shadow:var(--sh)}
+.svc .bg{display:block}.svc .ib{width:44px;height:44px;border-radius:14px;margin-bottom:auto}.svc .ib svg{width:24px;height:24px}.svc b{font-size:16px;line-height:1.15;letter-spacing:normal}.svc small{font-size:14px;margin-top:3px}
+.tabs button[aria-current=true] svg{color:var(--acc)}
+
+.photo-stub{display:flex;align-items:center;gap:14px;padding:16px;background:var(--card);border:1px dashed var(--line);border-radius:17px;color:var(--mut)}
+.photo-stub-icon{position:relative;display:grid;place-items:center;width:54px;height:54px;border-radius:13px;background:var(--bg)}
+.photo-stub-icon>svg:last-child{position:absolute;bottom:4px;right:4px;width:14px;height:14px;background:var(--card);border-radius:50%}
+.photo-stub b{display:block;font-size:14px;font-weight:500}.photo-stub small{display:block;font-size:12px;margin-top:4px}
 </style>
 </head>
 <body>
 <div id="app">
   <main id="view"></main>
-  <div class="dock" id="dock" hidden><div class="pr"><small>Ориентир</small><b id="pv">—</b></div><button id="go"></button></div>
+  <div class="dock" id="dock" hidden><button id="go"></button></div>
   <nav class="tabs" id="tabs"></nav>
   <div id="layer"><div class="scrim" data-a="close"></div><div class="sheet" id="sheet" role="dialog" aria-modal="true"></div></div>
 </div>
 <script>
-const tg = window.Telegram && Telegram.WebApp, inTg = !!(tg && tg.initData);
+const tg = window.Telegram && window.Telegram.WebApp, inTg = !!(tg && (tg.initData || (tg.platform && tg.platform !== 'unknown')));
 const dark = tg ? tg.colorScheme === 'dark' : matchMedia('(prefers-color-scheme: dark)').matches;
 document.documentElement.dataset.t = dark ? 'dark' : 'light';
 if (inTg) document.documentElement.classList.add('tg');
-if (tg) { tg.ready(); tg.expand(); try { tg.disableVerticalSwipes(); tg.setHeaderColor(dark ? '#0a1119' : '#f1f3f6'); tg.setBackgroundColor(dark ? '#0a1119' : '#f1f3f6'); tg.MainButton.hide(); } catch(e){} }
+if (inTg) { tg.ready(); tg.expand(); try { tg.disableVerticalSwipes(); tg.setHeaderColor(dark ? '#0a1119' : '#f1f3f6'); tg.setBackgroundColor(dark ? '#0a1119' : '#f1f3f6'); tg.MainButton.hide(); } catch(e){} }
+// Keep fallback insets current on clients that expose the JS API before CSS variables.
+function syncSafeArea(){
+ if(!inTg)return;
+ const root=document.documentElement.style;
+ const system=tg.safeAreaInset||{},content=tg.contentSafeAreaInset||{};
+ for(const edge of ['top','bottom','left','right']){
+  root.setProperty('--vg-safe-'+edge,Math.max(0,Number(system[edge])||0)+'px');
+  root.setProperty('--vg-content-'+edge,Math.max(0,Number(content[edge])||0)+'px');
+ }
+}
+if(inTg){
+ syncSafeArea();
+ for(const event of ['safeAreaChanged','contentSafeAreaChanged','fullscreenChanged','viewportChanged'])tg.onEvent(event,syncSafeArea);
+}
 const hap = (k) => { try { k ? tg.HapticFeedback.notificationOccurred(k) : tg.HapticFeedback.selectionChanged(); } catch(e){} };
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -141,159 +195,100 @@ const P = {
 };
 const ic = k => `<svg viewBox="0 0 24 24"><path d="${P[k]}"/></svg>`;
 
-// Цены «от» (руб./час) — с vash-gruz.by. У демонтажа цены на сайте нет.
+// До согласования тарифов стоимость рассчитывает менеджер.
 const SV = [
- {id:'trash',n:'Вывоз мусора',c:'#ff8a3d',d:'Стройка, мебель, дача',r:85},
- {id:'flat',n:'Квартирный переезд',c:'#3d8bff',d:'Грузчики и упаковка',r:55,mv:1},
- {id:'office',n:'Офисный переезд',c:'#7a5cff',d:'Мебель, техника, архив',r:105,mv:1},
- {id:'load',n:'Услуги грузчиков',c:'#19b36b',d:'Погрузка и разгрузка',r:45},
- {id:'rig',n:'Такелаж',c:'#d99a00',d:'Тяжёлое и крупное',r:50},
- {id:'dem',n:'Демонтаж',c:'#ff4d6d',d:'Разобрать и вывезти',r:0}];
-const VOL = [['Мало','пара вещей',1],['Средне','около полкузова',2],['Много','почти кузов',3],['Кузов','полная загрузка',5]];
-const SLOTS = [['Любое','в течение дня','sun'],['Утро','8:00–12:00','sun'],['День','12:00–17:00','clock'],['Вечер','17:00–21:00','clock']];
-const STAT = ['Принята','Оценка','В пути','Готово'];
+ {id:'trash',r:85,n:'Вывоз мусора',c:'#ff8a3d',d:'Стройка, мебель, дача',q:'Что нужно вывезти?',ph:'Например: старый диван и 10 мешков после ремонта'},
+ {id:'flat',r:55,n:'Квартирный переезд',c:'#3d8bff',d:'Вещи, мебель и техника',mv:1,q:'Что нужно перевезти?',ph:'Например: вещи из однокомнатной квартиры, диван и холодильник'},
+ {id:'office',r:105,n:'Офисный переезд',c:'#7a5cff',d:'Мебель, техника, архив',mv:1,q:'Что нужно перевезти?',ph:'Например: 8 рабочих мест, шкафы с документами и оргтехника'},
+ {id:'load',r:45,n:'Услуги грузчиков',c:'#19b36b',d:'Погрузка и разгрузка',q:'С чем нужна помощь?',ph:'Например: поднять холодильник и стиральную машину на 4-й этаж'},
+ {id:'rig',r:50,n:'Такелаж',c:'#d99a00',d:'Тяжёлое и крупное',q:'Что нужно переместить?',ph:'Например: сейф около 300 кг, с первого этажа в машину'},
+ {id:'dem',r:0,n:'Демонтаж',c:'#ff4d6d',d:'Разобрать и вывезти',q:'Что нужно разобрать?',ph:'Например: разобрать кухню и вывезти старые шкафы'}];
+const SLOTS = [['По согласованию','уточним вместе','chat'],['Утро','8:00–12:00','sun'],['День','12:00–17:00','clock'],['Вечер','17:00–21:00','clock']];
 const sv = id => SV.find(s => s.id === id) || SV[0];
 const iso = d => d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
 const plus = n => { const d = new Date(); d.setDate(d.getDate()+n); return d; };
 const today = () => iso(new Date());
-const fd = (s, long) => new Date(s+'T12:00').toLocaleDateString('ru-RU', long ? {weekday:'long', day:'numeric', month:'long'} : {day:'numeric', month:'long'});
+const fd = (s, long) => !s ? 'По согласованию' : new Date(s+'T12:00').toLocaleDateString('ru-RU', long ? {weekday:'long', day:'numeric', month:'long'} : {day:'numeric', month:'long'});
 const user = tg && tg.initDataUnsafe && tg.initDataUnsafe.user;
-
-let S = {tab:'home', w:null, step:0, last:null, sheet:null, cal:null, anim:'', orders:[]};
-try { const o = JSON.parse(localStorage.getItem('vg-orders')||'[]'); if (Array.isArray(o)) S.orders = o; } catch(e){}
-const newW = id => ({sv:id||'trash', vol:1, desc:'', photos:[], addr:'', to:'', floor:1, lift:true, dis:false, date:today(), slot:0, name:user?user.first_name:'', phone:''});
-// Демо-формула: ставка × часы по объёму; +10% с этажа выше первого без лифта; +20 BYN за разборку
-function est(w){ const s = sv(w.sv); if (!s.r) return null; let p = s.r * VOL[w.vol][2]; if (!w.lift && w.floor > 1) p *= 1.1; if (w.dis) p += 20; return Math.round(p); }
-const estTxt = w => { const e = est(w); return e ? '≈ '+e+' BYN' : 'по оценке'; };
-
-// ---- нижняя панель и навигация ----
+let S = {tab:'home', w:null, step:0, last:null, sheet:null, cal:null, anim:'', orders:[], errors:{}};
+try {
+ const current=localStorage.getItem('vg-requests-v2');
+ if(current){const o=JSON.parse(current);if(Array.isArray(o))S.orders=o}
+ else {const old=JSON.parse(localStorage.getItem('vg-orders')||'[]');if(Array.isArray(old))S.orders=old.map(o=>({...o,status:'draft',step:0,toFloor:1,toLift:true,slot:Math.max(0,SLOTS.findIndex(s=>s[0]===o.slot))}))}
+} catch(e){}
+const newW = id => ({sv:id||'trash',desc:'',addr:'',to:'',floor:1,lift:true,toFloor:1,toLift:true,dis:false,date:'',slot:0,name:user?user.first_name:'',phone:''});
+function save(){try{localStorage.setItem('vg-requests-v2',JSON.stringify(S.orders));return true}catch(e){return false}}
 const TABS = [['home','Заказ','truck'],['orders','Заявки','list']];
 $('#tabs').innerHTML = TABS.map(t => `<button data-a="tab" data-v="${t[0]}">${ic(t[2])}${t[1]}</button>`).join('');
 if (inTg) tg.BackButton.onClick(back);
-function back(){ hap(); if (S.sheet) return close(); S.anim = 'ab'; if (S.w && S.step > 0) S.step--; else { S.w = null; S.tab = 'home'; } render(); }
-let cur = 0, raf;
-function setPrice(n){
-  const el = $('#pv'); cancelAnimationFrame(raf);
-  if (n == null) { el.textContent = 'по оценке'; cur = 0; return; }
-  const from = cur, t0 = performance.now();
-  const f = t => { const k = Math.min(1, (t - t0) / 280); cur = Math.round(from + (n - from) * k); el.textContent = '≈ ' + cur + ' BYN'; if (k < 1) raf = requestAnimationFrame(f); };
-  raf = requestAnimationFrame(f);
-}
-
-// ---- экраны ----
+function back(){hap();if(S.sheet)return close();S.errors={};S.anim='ab';if(S.w&&S.step>0)S.step--;else{if(S.w&&(S.w.desc.trim()||S.w.addr.trim()))storeDraft();S.w=null;S.tab='home'}render()}
 function home(){
-  const o = S.orders[0];
-  return `<div class="hrow"><h1>Что нужно вывезти или перевезти?</h1><button class="rb" data-a="sheet" data-v="contact" aria-label="Связаться">${ic('phone')}</button></div>
-  ${o ? `<button class="live" data-a="tab" data-v="orders"><span class="dot"></span><span style="flex:1"><b>Заявка № ${esc(o.id)} · ${STAT[1]}</b><small>${esc(sv(o.sv).n)}, ${esc(fd(o.date))}</small></span>${ic('chev')}</button>` : ''}
-  <div class="sec"><b>Услуги</b><small>цена за час</small></div>
-  <div class="grid">${SV.map(s => `<button class="svc" style="--c:${s.c}" data-a="start" data-v="${s.id}"><span class="bg">${ic(s.id)}</span><span class="ib">${ic(s.id)}</span><b>${s.n}</b><small>${s.r ? 'от '+s.r+' BYN' : 'по оценке'}</small></button>`).join('')}</div>`;
+ const draft=S.orders.find(o=>o.status==='draft');
+ return `<div class="hrow"><h1>Что нужно вывезти<br>или перевезти?</h1></div>
+ ${draft?`<button class="quick-row resume" data-a="open-request" data-v="${esc(draft.id)}">${ic('list')}<div><b>Продолжить заказ</b><small>${esc(sv(draft.sv).n)}</small></div>${ic('chev')}</button>`:''}
+ <div class="sec home-section"><b>Услуги</b><small>цена за час</small></div>
+ <div class="grid">${SV.map(s=>`<button class="svc" style="--c:${s.c}" data-a="start" data-v="${s.id}"><span class="bg">${ic(s.id)}</span><span class="ib">${ic(s.id)}</span><b>${s.n}</b><small>${s.r?'от '+s.r+' BYN':'по оценке'}</small></button>`).join('')}</div>`;
 }
+const error = key => `<p class="error" id="err-${key}" role="alert">${esc(S.errors[key]||'')}</p>`;
+const addressField=(key,label,placeholder)=>`<label class="field-label" for="${key}">${label}</label><div class="fld ${S.errors[key]?'invalid':''}">${ic('pin')}<input id="${key}" data-f="${key}" maxlength="220" autocomplete="street-address" aria-describedby="err-${key}" aria-invalid="${!!S.errors[key]}" placeholder="${placeholder}" value="${esc(S.w[key])}"></div>${error(key)}`;
+function conditions(prefix,title){const w=S.w,f=prefix?'toFloor':'floor',l=prefix?'toLift':'lift';return `<p class="conditions-title">${title}</p><div class="card conditions"><div class="rw"><span>Этаж</span><div class="stp"><button data-a="fl" data-k="${f}" data-v="-1" aria-label="Уменьшить этаж" ${w[f]<=1?'disabled':''}>−</button><b>${w[f]}</b><button data-a="fl" data-k="${f}" data-v="1" aria-label="Увеличить этаж" ${w[f]>=50?'disabled':''}>+</button></div></div><div class="rw"><span>Есть лифт</span><button class="sw" role="switch" aria-checked="${w[l]}" aria-label="Есть лифт: ${title}" data-a="tgl" data-k="${l}"></button></div></div>`}
 function wizard(){
-  const w = S.w, s = sv(w.sv), seg = [0,1,2,3].map(i => `<i class="${i<=S.step?'on':''}"></i>`).join('');
-  const bar = `<div class="bar"><button id="bk" data-a="back" aria-label="Назад">${ic('back')}</button><div class="seg">${seg}</div><button data-a="exit" aria-label="Закрыть">${ic('x')}</button></div>`;
-  if (S.step === 0) return bar + `<div class="hd"><h1>Что везём?</h1><p class="sub">Выберите объём — цена пересчитается сразу</p></div>
-  <button class="pill" style="--c:${s.c}" data-a="sheet" data-v="svc"><span class="ib sm">${ic(s.id)}</span><b>${s.n}</b><em>Изменить</em></button>
-  <div class="vols">${VOL.map((v,i) => `<button class="vol" data-a="vol" data-v="${i}" aria-pressed="${i===w.vol}"><span class="bars">${[0,1,2,3].map(j => `<i class="${j<=i?'on':''}"></i>`).join('')}</span><b>${v[0]}</b><small>${v[1]}</small></button>`).join('')}</div>
-  <div class="sec"><b>Подробности</b><small>необязательно</small></div>
-  <div class="card"><textarea data-f="desc" maxlength="1000" placeholder="Например: диван, два кресла и коробки">${esc(w.desc)}</textarea><div class="ph">${w.photos.length<5 ? `<label>${ic('cam')}<input id="pf" type="file" accept="image/*" multiple hidden></label>` : ''}${w.photos.map((p,i) => `<div style="background-image:url('${p}')"><button class="x" data-a="rm" data-v="${i}" aria-label="Удалить фото">${ic('x')}</button></div>`).join('')}</div></div>
-  <p class="fine">Фото помогают менеджеру точнее назвать цену. До 5 снимков.</p>`;
-  if (S.step === 1) return bar + `<div class="hd"><h1>${s.mv ? 'Откуда и куда?' : 'Куда приехать?'}</h1><p class="sub">Минск и Минская область</p></div>
-  <label class="fld">${ic('pin')}<input data-f="addr" autocomplete="street-address" placeholder="${s.mv ? 'Адрес погрузки' : 'Улица, дом, подъезд'}" value="${esc(w.addr)}"></label>
-  ${s.mv ? `<label class="fld">${ic('pin')}<input data-f="to" placeholder="Адрес выгрузки" value="${esc(w.to)}"></label>` : ''}
-  <div class="card" style="margin-top:6px"><div class="rw"><span>Этаж</span><div class="stp"><button data-a="fl" data-v="-1" aria-label="Ниже">−</button><b>${w.floor}</b><button data-a="fl" data-v="1" aria-label="Выше">+</button></div></div>
-  <div class="rw"><span>Есть лифт</span><button class="sw" role="switch" aria-checked="${w.lift}" aria-label="Есть лифт" data-a="tgl" data-k="lift"></button></div>
-  <div class="rw"><span>Нужна разборка <small style="color:var(--mut)">+20 BYN</small></span><button class="sw" role="switch" aria-checked="${w.dis}" aria-label="Нужна разборка" data-a="tgl" data-k="dis"></button></div></div>
-  <p class="fine">Этаж выше первого без лифта — цена до +10%.</p>`;
-  if (S.step === 2) return bar + `<div class="hd"><h1>Когда удобно?</h1><p class="sub">Менеджер подтвердит точное время</p></div>
-  <div class="days">${Array.from({length:10}, (_, i) => plus(i)).map((d,i) => `<button class="day" data-a="day" data-v="${iso(d)}" aria-pressed="${iso(d)===w.date}"><small>${i===0?'Сегодня':d.toLocaleDateString('ru-RU',{weekday:'short'})}</small><b>${d.getDate()}</b></button>`).join('')}</div>
-  <button class="fld" data-a="sheet" data-v="cal">${ic('cal')}<span class="v">${fd(w.date,1)}</span><em>Весь календарь</em></button>
-  <div class="slots">${SLOTS.map((t,i) => `<button class="slot" data-a="slot" data-v="${i}" aria-pressed="${i===w.slot}">${ic(t[2])}<span><b>${t[0]}</b><small>${t[1]}</small></span></button>`).join('')}</div>`;
-  const rows = [['Услуга',s.n],['Объём',VOL[w.vol][0]],['Адрес',esc(w.addr)+(w.to ? ' → '+esc(w.to) : '')],['Когда',fd(w.date)+', '+SLOTS[w.slot][0].toLowerCase()]];
-  return bar + `<div class="hd"><h1>Как с вами связаться?</h1><p class="sub">Перезвоним и подтвердим цену</p></div>
-  <label class="fld">${ic('user')}<input data-f="name" autocomplete="given-name" placeholder="Имя" value="${esc(w.name)}"></label>
-  <label class="fld">${ic('phone')}<input data-f="phone" type="tel" autocomplete="tel" placeholder="+375 __ ___-__-__" value="${esc(w.phone)}"></label>
-  <div class="ticket">${rows.map(r => `<div class="r"><span>${r[0]}</span><b>${r[1]}</b></div>`).join('')}<div class="r tot"><span>Ориентир</span><b>${estTxt(w)}</b></div></div>
-  <p class="fine">Отправляя заявку, вы соглашаетесь с политикой конфиденциальности vash-gruz.by. Итоговую цену назовёт менеджер.</p>`;
+ const w=S.w,s=sv(w.sv),seg=[0,1,2].map(i=>`<i class="${i<=S.step?'on':''}"></i>`).join('');
+ const bar=`<div class="bar"><button id="bk" data-a="back" aria-label="Назад">${ic('back')}</button><div class="seg">${seg}</div><button data-a="exit" aria-label="Сохранить черновик и закрыть">${ic('x')}</button></div><p class="step-label">Шаг ${S.step+1} из 3 · ${['Задача','Место и время','Контакт'][S.step]}</p>`;
+ if(S.step===0)return bar+`<div class="hd"><h1>${s.q}</h1><p class="sub">Коротко: что и сколько.</p></div>
+ <button class="pill" style="--c:${s.c}" data-a="sheet" data-v="svc"><span class="ib sm">${ic(s.id)}</span><b>${s.n}</b><em>Изменить</em></button>
+ <label class="field-label" for="desc">Что и примерно сколько?</label><div class="card input-card"><textarea id="desc" class="task-input" data-f="desc" maxlength="1000" aria-describedby="err-desc" aria-invalid="${!!S.errors.desc}" placeholder="${s.ph}">${esc(w.desc)}</textarea></div>${error('desc')}
+ <div class="sec"><b>Фото</b><small>необязательно</small></div><div class="photo-stub" aria-label="Добавление фото пока недоступно"><div class="photo-stub-icon">${ic('cam')}${ic('plus')}</div><div><b>Добавить фото</b><small>Скоро</small></div></div>`;
+ if(S.step===1)return bar+`<div class="hd"><h1>${s.mv?'Откуда и куда?':'Куда приехать?'}</h1><p class="sub">Адрес и удобное время.</p></div>
+ ${addressField('addr',s.mv?'Адрес погрузки':'Адрес','Улица, дом, населённый пункт')}${conditions('',s.mv?'На погрузке':'Условия на месте')}
+ ${s.mv?addressField('to','Адрес выгрузки','Улица, дом, населённый пункт')+conditions('to','На выгрузке'):''}
+ <div class="card conditions" style="margin-top:10px"><div class="rw"><span>Нужна разборка</span><button class="sw" role="switch" aria-checked="${w.dis}" aria-label="Нужна разборка" data-a="tgl" data-k="dis"></button></div></div>
+ <div class="sec"><b>Когда удобно?</b><small>Можно уточнить позже</small></div>${error('date')}
+ <div class="days"><button class="day" style="width:103px" data-a="day" data-v="" aria-pressed="${!w.date}"><small>Уточним</small><b style="font-size:14px">Позже</b></button>${Array.from({length:5},(_,i)=>plus(i)).map((d,i)=>`<button class="day" data-a="day" data-v="${iso(d)}" aria-pressed="${iso(d)===w.date}"><small>${i===0?'Сегодня':i===1?'Завтра':d.toLocaleDateString('ru-RU',{weekday:'short'})}</small><b>${d.getDate()}</b></button>`).join('')}</div>
+ <button class="fld" data-a="sheet" data-v="cal">${ic('cal')}<span class="v">${w.date?esc(fd(w.date)):'Выбрать другую дату'}</span>${ic('chev')}</button>
+ ${w.date?`<div class="slots">${SLOTS.map((t,i)=>`<button class="slot" data-a="slot" data-v="${i}" aria-pressed="${i===w.slot}">${ic(t[2])}<span><b>${t[0]}</b><small>${t[1]}</small></span></button>`).join('')}</div>`:''}`;
+ return bar+`<div class="hd"><h1>Контакт</h1><p class="sub">Для согласования стоимости.</p></div>
+ <label class="field-label" for="phone">Телефон</label><div class="fld ${S.errors.phone?'invalid':''}">${ic('phone')}<input id="phone" data-f="phone" type="tel" inputmode="tel" autocomplete="tel" maxlength="25" aria-describedby="err-phone" aria-invalid="${!!S.errors.phone}" placeholder="+375 __ ___-__-__" value="${esc(w.phone)}"></div>${error('phone')}
+ <label class="field-label" for="name">Имя <span style="font-weight:400;color:var(--mut)">· необязательно</span></label><div class="fld">${ic('user')}<input id="name" data-f="name" autocomplete="given-name" maxlength="60" placeholder="Как к вам обращаться" value="${esc(w.name)}"></div>
+ <div class="sec"><b>Ваша задача</b><button class="review-edit" data-a="edit" data-v="0">Изменить</button></div>${ticket(w)}
+ <p class="fine">Демо-режим: заявка сохранится в приложении.</p>`;
 }
-function orders(){
-  return `<h1 style="margin:6px 0 16px">Мои заявки</h1>` + (S.orders.length ? S.orders.map(o => { const s = sv(o.sv); return `<div class="ord"><div class="h"><span class="ib" style="--c:${s.c}">${ic(s.id)}</span><div><b>${s.n}</b><br><small>№ ${esc(o.id)} · ${esc(fd(o.date))}</small></div><span style="font-weight:700">${o.estimate ? '≈ '+o.estimate+' BYN' : ''}</span></div>
-  <div class="tl">${STAT.map((t,i) => `<div class="${i<=1?'on':''}">${t}</div>`).join('')}</div>
-  <p class="sub" style="font-size:14px">${ic('pin').replace('<svg','<svg style="width:14px;height:14px;vertical-align:-2px"')} ${esc(o.addr)}</p><button class="btn2" data-a="again" data-v="${esc(o.id)}">Повторить заявку</button></div>`; }).join('') : `<div class="empty"><div class="ib">${ic('list')}</div><b style="color:var(--ink);font-size:18px">Заявок пока нет</b><p style="margin:6px 0 18px">Оформите первую — это займёт минуту</p><button class="btn2" style="background:var(--acc);color:var(--accx)" data-a="tab" data-v="home">Заказать</button></div>`);
-}
-function done(){
-  const o = S.last;
-  return `<div class="done"><div class="ring">${ic('check')}</div><h1>Заявка отправлена</h1><p class="sub">№ ${esc(o.id)} · менеджер позвонит в течение 5 минут</p></div>
-  <div class="ticket">${[['Услуга',sv(o.sv).n],['Когда',fd(o.date)+', '+o.slot.toLowerCase()],['Адрес',esc(o.addr)]].map(r => `<div class="r"><span>${r[0]}</span><b>${r[1]}</b></div>`).join('')}<div class="r tot"><span>Ориентир</span><b>${o.estimate ? '≈ '+o.estimate+' BYN' : 'по оценке'}</b></div></div>
-  <button class="btn2" data-a="tab" data-v="orders">Следить за заявкой</button>`;
-}
+function ticket(w){const s=sv(w.sv);const rows=[['Услуга',s.n],['Задача',w.desc],['Адрес',w.addr],['Условия',`${w.floor} этаж, ${w.lift?'есть лифт':'без лифта'}`],...(s.mv?[['Куда',w.to],['На выгрузке',`${w.toFloor} этаж, ${w.toLift?'есть лифт':'без лифта'}`]]:[]),...(w.dis?[['Разборка','Нужна']]:[]),['Когда',fd(w.date)+(w.date&&w.slot?', '+SLOTS[w.slot][0].toLowerCase():'')]];return `<div class="ticket">${rows.map(([a,b])=>`<div class="r"><span>${a}</span><b>${esc(b)}</b></div>`).join('')}<div class="r tot"><span>Стоимость</span><b style="font-size:16px">После оценки</b></div></div>`}
+function orders(){return `<div class="app-receipt-head"><h1>Заявки</h1><button data-a="tab" data-v="home">+ Новая</button></div>`+(S.orders.length?S.orders.map(o=>`<div class="ord"><div class="h"><span class="ib" style="--c:${sv(o.sv).c}">${ic(o.sv)}</span><div><b>${sv(o.sv).n}</b><br><small>№ ${esc(o.id)} · ${esc(fd(o.date))}</small></div></div><span class="status">${o.status==='demo'?'Демо-заявка':o.status==='prepared'?'Подготовлена':'Черновик'}</span><p class="sub" style="font-size:14px">${esc(o.desc)}</p><div class="order-foot"><button class="btn2" data-a="open-request" data-v="${esc(o.id)}">${o.status!=='draft'?'Открыть':'Продолжить'}</button><button class="review-edit" data-a="again" data-v="${esc(o.id)}">Повторить</button></div></div>`).join(''):`<div class="empty"><div class="ib">${ic('list')}</div><b style="color:var(--ink);font-size:18px">Заявок пока нет</b><p style="margin:6px 0 18px">Расскажите, с чем нужна помощь</p><button class="btn2" style="background:var(--acc);color:var(--accx)" data-a="tab" data-v="home">Выбрать услугу</button></div>`)}
+function done(){const o=S.last;return `<div class="done"><div class="ring">${ic('check')}</div><h1>Заявка создана</h1><p class="sub">№ ${esc(o.id.slice(-6))}</p></div><div class="app-status"><i></i>Демо · сохранена на устройстве</div>${ticket(o)}<p class="fine">Отправка на расчёт пока не подключена.</p><button class="btn2" data-a="edit-last">Изменить заявку</button>`}
 function sheetHTML(){
-  if (S.sheet === 'contact') return `<div class="grab"></div><h3>Связаться</h3>
-  <a class="call" href="tel:+375336610672">${ic('phone')}<span><b>+375 33 661-06-72</b><small>Позвонить · без выходных, 24 часа</small></span></a>
-  <div class="two"><a class="msg" href="https://t.me/+375298780559"><span class="ib" style="--c:#2a9df4">${ic('send')}</span><b>Telegram</b></a><a class="msg" href="https://api.whatsapp.com/send?phone=375298780559"><span class="ib" style="--c:#19b36b">${ic('chat')}</span><b>WhatsApp</b></a></div>
-  <p class="fine">Вторая линия: +375 44 761-06-72. Минск и Минская область. ИП Арановская О. А., УНП 693181365.</p>`;
-  if (S.sheet === 'svc') return `<div class="grab"></div><h3>Услуга</h3>${SV.map(s => `<button class="opt" style="--c:${s.c}" data-a="pick" data-v="${s.id}" aria-pressed="${S.w.sv===s.id}"><span class="ib sm">${ic(s.id)}</span><div><b>${s.n}</b><small>${s.d}</small></div>${S.w.sv===s.id ? ic('check') : ''}</button>`).join('')}`;
-  const {y, m} = S.cal, w = S.w, first = new Date(y, m, 1), off = (first.getDay()+6)%7, n = new Date(y, m+1, 0).getDate(), now = new Date();
-  const cells = Array(off).fill('<span></span>').concat(Array.from({length:n}, (_, i) => { const d = iso(new Date(y, m, i+1)); return `<button data-a="pickd" data-v="${d}" class="${d===today()?'now ':''}${d===w.date?'sel':''}" ${d<today()?'disabled':''} aria-label="${fd(d)}">${i+1}</button>`; }));
-  return `<div class="grab"></div><h3>Выберите дату</h3><div class="cal"><div class="cal-h"><button data-a="mo" data-v="-1" ${y===now.getFullYear()&&m===now.getMonth()?'disabled':''} aria-label="Прошлый месяц">${ic('back')}</button><b>${first.toLocaleDateString('ru-RU',{month:'long',year:'numeric'})}</b><button data-a="mo" data-v="1" aria-label="Следующий месяц">${ic('chev')}</button></div>
-  <div class="cal-g">${['Пн','Вт','Ср','Чт','Пт','Сб','Вс'].map(x => `<span class="w">${x}</span>`).join('')}${cells.join('')}</div></div>`;
+ if(S.sheet==='svc')return `<div class="grab"></div><h3>Услуга</h3>${SV.map(s=>`<button class="opt" style="--c:${s.c}" data-a="pick" data-v="${s.id}" aria-pressed="${S.w.sv===s.id}"><span class="ib sm">${ic(s.id)}</span><div><b>${s.n}</b><small>${s.d}</small></div>${S.w.sv===s.id?ic('check'):''}</button>`).join('')}`;
+ const {y,m}=S.cal,w=S.w,first=new Date(y,m,1),off=(first.getDay()+6)%7,n=new Date(y,m+1,0).getDate(),now=new Date();
+ const cells=Array(off).fill('<span></span>').concat(Array.from({length:n},(_,i)=>{const d=iso(new Date(y,m,i+1));return `<button data-a="pickd" data-v="${d}" class="${d===today()?'now ':''}${d===w.date?'sel':''}" ${d<today()?'disabled':''} aria-label="${fd(d)}">${i+1}</button>`}));
+ return `<div class="grab"></div><h3>Выберите дату</h3><div class="cal"><div class="cal-h"><button data-a="mo" data-v="-1" ${y===now.getFullYear()&&m===now.getMonth()?'disabled':''} aria-label="Прошлый месяц">${ic('back')}</button><b>${first.toLocaleDateString('ru-RU',{month:'long',year:'numeric'})}</b><button data-a="mo" data-v="1" aria-label="Следующий месяц">${ic('chev')}</button></div><div class="cal-g">${['Пн','Вт','Ср','Чт','Пт','Сб','Вс'].map(x=>`<span class="w">${x}</span>`).join('')}${cells.join('')}</div></div>`;
 }
-function openSheet(k){ S.sheet = k; if (k === 'cal') { const d = new Date(S.w.date+'T12:00'); S.cal = {y:d.getFullYear(), m:d.getMonth()}; } $('#sheet').innerHTML = sheetHTML(); $('#layer').className = 'open'; }
-function close(){ S.sheet = null; $('#layer').className = ''; }
-
-// ---- логика ----
-function valid(){
-  const w = S.w, s = sv(w.sv);
-  if (S.step === 1) return w.addr.trim().length > 4 && (!s.mv || w.to.trim().length > 4);
-  if (S.step === 3) return w.name.trim().length > 0 && w.phone.replace(/\D/g,'').length >= 9;
-  return true;
-}
-function refresh(){ if (!S.w) return; $('#go').textContent = S.step === 3 ? 'Отправить заявку' : 'Продолжить'; $('#go').disabled = !valid(); setPrice(est(S.w)); }
-$('#go').onclick = () => {
-  if (!valid()) return; hap();
-  if (S.step < 3) { S.step++; S.anim = 'af'; return render(); }
-  const w = S.w, o = {id:String(Date.now()).slice(-6), sv:w.sv, vol:VOL[w.vol][0], desc:w.desc.trim(), addr:w.addr.trim(), to:w.to.trim(), floor:w.floor, lift:w.lift, dis:w.dis, date:w.date, slot:SLOTS[w.slot][0], name:w.name.trim(), phone:w.phone.trim(), estimate:est(w), photos:w.photos.length, tg_user:user ? user.id : null};
-  S.orders.unshift(o); try { localStorage.setItem('vg-orders', JSON.stringify(S.orders)); } catch(e){}
-  S.last = o; S.w = null; S.tab = 'done'; S.anim = 'af'; hap('success'); render();
-  // sendData закрывает приложение; лимит 4096 байт — фото сюда не поместятся, нужен сервер.
-  if (inTg) tg.sendData(JSON.stringify(o));
-};
-function render(){
-  const wiz = !!S.w, v = $('#view');
-  v.className = S.anim; S.anim = '';
-  v.innerHTML = wiz ? wizard() : ({home, orders, done}[S.tab] || home)();
-  if (!wiz) v.scrollTop = 0;
-  $('#dock').hidden = !wiz; $('#tabs').hidden = wiz;
-  document.querySelectorAll('#tabs button').forEach(b => b.setAttribute('aria-current', b.dataset.v === S.tab));
-  if (inTg) wiz ? tg.BackButton.show() : tg.BackButton.hide();
-  if (wiz) refresh();
-  const pf = $('#pf'); if (pf) pf.onchange = e => { [...e.target.files].slice(0, 5 - S.w.photos.length).forEach(f => S.w.photos.push(URL.createObjectURL(f))); keep(() => {}); };
-}
-const keep = fn => { const y = $('#view').scrollTop; fn(); render(); $('#view').scrollTop = y; };
-document.addEventListener('click', e => {
-  const b = e.target.closest('[data-a]'); if (!b) return;
-  const a = b.dataset.a, v = b.dataset.v, k = b.dataset.k, w = S.w; hap();
-  if (a === 'tab') { S.tab = v; S.anim = 'af'; return render(); }
-  if (a === 'start') { S.w = newW(v); S.step = 0; S.anim = 'af'; return render(); }
-  if (a === 'again') { const o = S.orders.find(x => x.id === v); if (o) { S.w = {...newW(o.sv), desc:o.desc, addr:o.addr, to:o.to, floor:o.floor, lift:o.lift, name:o.name, phone:o.phone}; S.step = 0; S.anim = 'af'; render(); } return; }
-  if (a === 'back') return back();
-  if (a === 'exit') { S.w = null; S.tab = 'home'; S.anim = 'ab'; return render(); }
-  if (a === 'sheet') return openSheet(v);
-  if (a === 'close') return close();
-  if (a === 'mo') { const d = new Date(S.cal.y, S.cal.m + +v, 1); S.cal = {y:d.getFullYear(), m:d.getMonth()}; $('#sheet').innerHTML = sheetHTML(); return; }
-  if (!w) return;
-  if (a === 'pick') { w.sv = v; close(); return keep(() => {}); }
-  if (a === 'pickd') { w.date = v; close(); return keep(() => {}); }
-  keep(() => {
-    if (a === 'vol') w.vol = +v;
-    if (a === 'slot') w.slot = +v;
-    if (a === 'tgl') w[k] = !w[k];
-    if (a === 'fl') w.floor = Math.min(50, Math.max(1, w.floor + +v));
-    if (a === 'day') w.date = v;
-    if (a === 'rm') w.photos.splice(+v, 1);
-  });
+let sheetFocus=null;
+function openSheet(k){sheetFocus=document.activeElement;S.sheet=k;if(k==='cal'){const d=new Date((S.w.date||today())+'T12:00');S.cal={y:d.getFullYear(),m:d.getMonth()}}$('#sheet').innerHTML=sheetHTML()+'<button class="btn2" data-a="close">Закрыть</button>';$('#layer').className='open';$('#sheet').setAttribute('aria-label',k==='cal'?'Выбор даты':'Выбор услуги');$('#view').inert=true;$('#dock').inert=true;$('#tabs').inert=true;$('#sheet button, #sheet a')?.focus()}
+function close(){S.sheet=null;$('#layer').className='';$('#view').inert=false;$('#dock').inert=false;$('#tabs').inert=false;sheetFocus?.focus()}
+function validate(){const w=S.w,e={};if(S.step===0&&!w.desc.trim())e.desc='Напишите, что нужно сделать. Например: вывезти диван.';if(S.step===1){if(w.addr.trim().length<5)e.addr='Укажите улицу, дом и населённый пункт.';if(sv(w.sv).mv&&w.to.trim().length<5)e.to='Укажите адрес выгрузки.';if(w.date&&w.date<today())e.date='Выберите сегодняшнюю или будущую дату.'}if(S.step===2){const digits=w.phone.replace(/\D/g,'');if(!/^(?:375\d{9}|80\d{9})$/.test(digits))e.phone='Введите номер: +375 и 9 цифр, либо 8 0 и 9 цифр.'}return e}
+function refresh(){if(S.w)$('#go').textContent=S.step===2?'Получить расчёт':S.step===0?'Далее: адрес':'Далее: контакт'}
+function storeDraft(status='draft'){const w=S.w;if(!w)return null;const o={...w,id:w.id||String(Date.now()),status,step:S.step,updatedAt:new Date().toISOString()};const i=S.orders.findIndex(x=>x.id===o.id);if(i<0)S.orders.unshift(o);else S.orders[i]=o;S.w.id=o.id;save();return o}
+$('#go').onclick=()=>{if(!S.w){if(S.tab==='done'){S.tab='orders';render()}return;}S.errors=validate();if(Object.keys(S.errors).length){render();const first=Object.keys(S.errors)[0];$('#'+first)?.focus();return}hap();if(S.step<2){storeDraft();S.step++;S.anim='af';return render()}const o=storeDraft('demo');S.last=o;S.w=null;S.tab='done';S.anim='af';render()};
+function render(){const wiz=!!S.w,v=$('#view');v.className=S.anim;S.anim='';v.innerHTML=wiz?wizard():({home,orders,done}[S.tab]||home)();v.scrollTop=0;$('#dock').hidden=!wiz&&S.tab!=='done';$('#tabs').hidden=wiz||S.tab==='done';if(!wiz&&S.tab==='done')$('#go').textContent='Мои заявки';document.querySelectorAll('#tabs button').forEach(b=>b.setAttribute('aria-current',b.dataset.v===S.tab));if(inTg)(wiz||S.tab==='done')?tg.BackButton.show():tg.BackButton.hide();if(wiz)refresh()}
+const keep=fn=>{const y=$('#view').scrollTop;fn();render();$('#view').scrollTop=y};
+document.addEventListener('click',e=>{const b=e.target.closest('[data-a]');if(!b)return;const a=b.dataset.a,v=b.dataset.v,k=b.dataset.k,w=S.w;hap();
+ if(a==='tab'){S.tab=v;S.anim='af';return render()}
+ if(a==='start'){S.w=newW(v);S.step=0;S.errors={};S.anim='af';return render()}
+ if(a==='again'||a==='open-request'){const o=S.orders.find(x=>x.id===v);if(!o)return;if(a==='open-request'&&o.status!=='draft'){S.last=o;S.tab='done';return render()}S.w={...newW(o.sv),...o,...(a==='again'?{id:null,date:'',slot:0}: {})};S.step=a==='again'?0:Math.min(o.step||0,2);S.errors={};return render()}
+ if(a==='back')return back();
+ if(a==='exit'){if(w.desc.trim()||w.addr.trim()||w.phone.trim())storeDraft();S.w=null;S.errors={};S.tab='home';S.anim='ab';return render()}
+ if(a==='edit'){S.step=+v;S.errors={};return render()}
+ if(a==='edit-last'){S.w={...S.last};S.step=0;S.errors={};return render()}
+ if(a==='sheet')return openSheet(v);
+ if(a==='close')return close();
+ if(a==='mo'){const d=new Date(S.cal.y,S.cal.m + +v,1);S.cal={y:d.getFullYear(),m:d.getMonth()};$('#sheet').innerHTML=sheetHTML()+'<button class="btn2" data-a="close">Закрыть</button>';return}
+ if(!w)return;
+ if(a==='pick'){w.sv=v;S.errors={};close();return keep(()=>{})}
+ if(a==='pickd'){w.date=v;close();return keep(()=>{})}
+ keep(()=>{if(a==='slot')w.slot=+v;if(a==='tgl')w[k]=!w[k];if(a==='fl')w[k]=Math.min(50,Math.max(1,w[k] + +v));if(a==='day'){w.date=v;if(!v)w.slot=0}})
 });
-document.addEventListener('input', e => { const f = e.target.dataset.f; if (f && S.w) { S.w[f] = e.target.value; refresh(); } });
-document.addEventListener('keydown', e => { if (e.key === 'Escape' && S.sheet) close(); });
+document.addEventListener('input',e=>{const f=e.target.dataset.f;if(f&&S.w){S.w[f]=e.target.value;if(S.errors[f]){delete S.errors[f];$('#err-'+f).textContent='';e.target.setAttribute('aria-invalid','false');e.target.closest('.fld')?.classList.remove('invalid')}refresh()}});
+document.addEventListener('keydown',e=>{if(!S.sheet)return;if(e.key==='Escape')return close();if(e.key==='Tab'){const items=[...document.querySelectorAll('#sheet button:not(:disabled), #sheet a')];const first=items[0],last=items[items.length-1];if(e.shiftKey&&document.activeElement===first){e.preventDefault();last.focus()}else if(!e.shiftKey&&document.activeElement===last){e.preventDefault();first.focus()}}});
 render();
 </script>
 </body>
