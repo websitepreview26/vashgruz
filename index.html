@@ -2,14 +2,14 @@
 <html lang="ru">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="viewport" content="width=device-width, initial-scale=1, minimum-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
 <title>Ваш Груз</title>
 <script src="https://telegram.org/js/telegram-web-app.js"></script>
 <style>
 :root{--bg:#f3f4f6;--card:#fff;--ink:#0f1b2a;--mut:#6c7a89;--line:rgba(15,27,42,.09);--acc:#ffbf16;--accx:#1a1400;--navy:#0f1b2a;--sh:0 1px 2px rgba(15,27,42,.05),0 10px 28px rgba(15,27,42,.07)}
 [data-t=dark]{--bg:#0a1119;--card:#131d28;--ink:#eef3f8;--mut:#8796a7;--line:rgba(255,255,255,.08);--sh:0 10px 28px rgba(0,0,0,.4)}
 *{box-sizing:border-box;margin:0;-webkit-tap-highlight-color:transparent}
-html,body{height:100%;background:var(--bg)}
+html,body{height:100%;background:var(--bg);touch-action:pan-x pan-y}
 body{font:16px/1.35 -apple-system,BlinkMacSystemFont,"SF Pro Text","Segoe UI",Roboto,sans-serif;color:var(--ink)}
 button{font:inherit;color:inherit;border:0;background:none;cursor:pointer}
 input,textarea{font:inherit;color:var(--ink)}
@@ -172,6 +172,13 @@ body{background:var(--bg)}.app-toolbar{display:flex;align-items:center;justify-c
   <div id="layer"><div class="scrim" data-a="close"></div><div class="sheet" id="sheet" role="dialog" aria-modal="true"></div></div>
 </div>
 <script>
+// iOS WebViews may ignore viewport zoom limits; block multi-touch zoom only.
+for(const event of ['gesturestart','gesturechange','gestureend']){
+ document.addEventListener(event,e=>e.preventDefault(),{passive:false});
+}
+document.addEventListener('touchmove',e=>{
+ if(e.touches.length>1)e.preventDefault();
+},{passive:false});
 const tg = window.Telegram && window.Telegram.WebApp, inTg = !!(tg && (tg.initData || (tg.platform && tg.platform !== 'unknown')));
 const systemTheme=matchMedia('(prefers-color-scheme: dark)');
 function syncTheme(){
