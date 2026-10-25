@@ -47,7 +47,7 @@ test('configured API sends form and files; only confirmed result produces succes
   assert.equal(calls[0].body.get('initData'),'signed-test-data');assert.match(calls[0].body.get('requestId'),/^[a-f\d-]{36}$/);
   finish(Response.json({ok:true,id:'VG-TEST',photoCount:0}));await pending;
   assert.equal(c.run('S.sending'),false);assert.equal(c.run('S.last.status'),'sent');assert.equal(c.run('S.last.serverId'),'VG-TEST');
-  assert.match(c.node('#view').innerHTML,/Заявка отправлена/);
+  assert.match(c.node('#view').innerHTML,/<h2>Получена<\/h2>/);
 });
 test('failure preserves photos and uses same request ID on retry',async()=>{
   const calls=[];const c=client({live:true,fetcher:async(url,opts)=>{calls.push(opts.body);return Response.json({ok:false,message:'Попробуйте позже'},{status:502})}});
@@ -55,4 +55,19 @@ test('failure preserves photos and uses same request ID on retry',async()=>{
   c.context.files=[new File(['image'],'test.jpg',{type:'image/jpeg'})];await c.run('addPhotos(files)');
   await c.run('submitOrder()');assert.equal(c.run('S.w.photos.length'),1);assert.equal(c.run('S.last'),null);assert.match(c.run('S.submitError'),/Попробуйте/);
   await c.run('submitOrder()');assert.equal(calls[0].get('requestId'),calls[1].get('requestId'));assert.equal(calls[0].getAll('photos').length,1);
+});
+
+test('server status replaces cached status, keeps drafts, and preserves scroll',async()=>{
+ const remote={...{sv:'trash',desc:'Диван',addr:'Минск, Ленина 1',to:'',floor:1,toFloor:1,lift:true,toLift:true,dis:false,date:'',slot:0,name:'',phone:'+375291234567'},serverId:'VG-TEST',requestId:'remote-request',status:'sent',businessStatus:'processing',statusUpdatedAt:Date.now(),photoCount:0,history:[{status:'received',at:Date.now()}]};
+ const c=client({live:true,fetcher:async()=>Response.json({ok:true,orders:[remote]})});
+ c.context.remote=remote;
+ c.run("S.orders=[{...remote,id:'local-sent',businessStatus:'received'},{id:'draft-1',sv:'trash',status:'draft',desc:'Черновик',date:''}];S.tab='orders';render()");
+ c.node('#view').scrollTop=120;await c.run('syncOrders()');
+ assert.equal(c.run('S.orders.length'),2);assert.equal(c.run('S.orders[0].businessStatus'),'processing');assert.equal(c.run('S.orders[0].id'),'local-sent');assert.equal(c.node('#view').scrollTop,120);
+ assert.match(c.node('#view').innerHTML,/На оценке/);assert.match(c.node('#view').innerHTML,/Черновик/);
+});
+test('status fetch failure keeps last known state instead of fabricating progress',async()=>{
+ const c=client({live:true,fetcher:async()=>{throw Error('offline')}});
+ c.run("S.orders=[{id:'local',serverId:'VG-TEST',sv:'trash',status:'sent',businessStatus:'received',date:'',desc:'Диван'}];S.tab='orders'");
+ await c.run('syncOrders()');assert.equal(c.run('S.orders[0].businessStatus'),'received');assert.match(c.node('#view').innerHTML,/Не удалось обновить статусы/);
 });

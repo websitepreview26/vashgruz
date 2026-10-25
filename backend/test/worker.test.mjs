@@ -24,11 +24,15 @@ const photo=()=>new File([new Uint8Array([255,216,255,224,0,0,255,217])],'test.j
 function env(){
   const sqlite=new DatabaseSync(':memory:');
   sqlite.exec(readFileSync(new URL('../migrations/0001_orders.sql',import.meta.url),'utf8'));
+  sqlite.exec(readFileSync(new URL('../migrations/0002_statuses.sql',import.meta.url),'utf8'));
   return {BOT_TOKEN:TOKEN,TELEGRAM_CHAT_ID:'-100123456789',ALLOWED_ORIGIN:ORIGIN,DB:{
     prepare(sql){return {bind(...args){return {
+      sql,args,
       async first(){return sqlite.prepare(sql).get(...args)||null},
+      async all(){return {results:sqlite.prepare(sql).all(...args)}},
       async run(){return {meta:{changes:Number(sqlite.prepare(sql).run(...args).changes)}}}
-    }}}}
+    }}}},
+    async batch(statements){sqlite.exec('BEGIN');try{const results=statements.map(s=>({meta:{changes:Number(sqlite.prepare(s.sql).run(...s.args).changes)}}));sqlite.exec('COMMIT');return results}catch(e){sqlite.exec('ROLLBACK');throw e}}
   },sqlite};
 }
 async function request({id=crypto.randomUUID(),data=order(),files=[],init,origin=ORIGIN}={}){
@@ -122,4 +126,75 @@ test('per-user hourly limit and bounded body size',async()=>{
   assert.equal((await worker.fetch(await request(),e)).status,429);assert.equal(calls.length,10);
   const r=await request();r.headers.set('content-length',String(13*1024*1024));
   assert.equal((await worker.fetch(r,e)).status,413);
+});
+
+const WEBHOOK_SECRET='test-webhook-secret-with-more-than-32-characters';
+async function listRequest(init){return new Request('https://api.example/api/orders/list',{method:'POST',headers:{origin:ORIGIN,'content-type':'application/json'},body:JSON.stringify({initData:init||await auth()})})}
+function callbackRequest(id,version,action,{secret=WEBHOOK_SECRET,actor=77,chat=-100123456789,message=100,callbackId=crypto.randomUUID()}={}){
+ return new Request('https://api.example/telegram/webhook',{method:'POST',headers:{'content-type':'application/json','X-Telegram-Bot-Api-Secret-Token':secret},body:JSON.stringify({callback_query:{id:callbackId,from:{id:actor},data:`vg:${id}:${version}:${action}`,message:{message_id:message,chat:{id:chat},text:'Новая заявка\\n\\nСтатус: Получена'}}})});
+}
+function managerMock(role='administrator'){
+ return telegramMock(method=>{
+  if(method==='getChatMember')return Response.json({ok:true,result:{status:role}});
+  if(method==='answerCallbackQuery'||method.startsWith('editMessage'))return Response.json({ok:true,result:true});
+ });
+}
+
+test('new orders have manager buttons and received event',async()=>{
+ const e=env(),calls=managerMock();const result=await (await worker.fetch(await request(),e)).json();
+ const buttons=JSON.parse(calls[0].form.get('reply_markup')).inline_keyboard;
+ assert.match(buttons[0][0].callback_data,/vg:VG-[A-F0-9]{12}:0:processing/);
+ assert.equal(result.businessStatus,'received');assert(result.statusUpdatedAt>0);
+ assert.equal(e.sqlite.prepare('SELECT COUNT(*) n FROM order_status_events').get().n,1);
+});
+test('list returns only the authenticated customer orders',async()=>{
+ const e=env();managerMock();await worker.fetch(await request(),e);
+ const own=await (await worker.fetch(await listRequest(),e)).json();assert.equal(own.orders.length,1);assert.equal(own.orders[0].history[0].status,'received');
+ const other=await auth({user:JSON.stringify({id:99,first_name:'Other'})});
+ assert.equal((await (await worker.fetch(await listRequest(other),e)).json()).orders.length,0);
+ assert.equal((await worker.fetch(await listRequest('invalid'),e)).status,401);
+});
+test('manager moves through the real lifecycle; customer sees updates',async()=>{
+ const e={...env(),TELEGRAM_WEBHOOK_SECRET:WEBHOOK_SECRET};managerMock();const {id}=await (await worker.fetch(await request(),e)).json();
+ for(const [version,action] of ['processing','confirmed','completed'].entries()){
+  const response=await worker.fetch(callbackRequest(id,version,action),e);assert.equal(response.status,200);
+  assert.equal(e.sqlite.prepare('SELECT business_status FROM orders').get().business_status,action);
+ }
+ const list=await (await worker.fetch(await listRequest(),e)).json();assert.equal(list.orders[0].businessStatus,'completed');assert.equal(list.orders[0].history.length,4);
+});
+test('forged webhook, foreign chat, ordinary members and wrong message cannot change status',async()=>{
+ const e={...env(),TELEGRAM_WEBHOOK_SECRET:WEBHOOK_SECRET};managerMock('member');const {id}=await (await worker.fetch(await request(),e)).json();
+ assert.equal((await worker.fetch(callbackRequest(id,0,'processing',{secret:'invalid'}),e)).status,403);
+ await worker.fetch(callbackRequest(id,0,'processing'),e);
+ managerMock();await worker.fetch(callbackRequest(id,0,'processing',{chat:-555}),e);
+ await worker.fetch(callbackRequest(id,0,'processing',{message:999}),e);
+ assert.equal(e.sqlite.prepare('SELECT business_status FROM orders').get().business_status,'received');
+});
+test('stale and duplicate callbacks do not reverse or repeat transitions',async()=>{
+ const e={...env(),TELEGRAM_WEBHOOK_SECRET:WEBHOOK_SECRET};managerMock();const {id}=await (await worker.fetch(await request(),e)).json();
+ const opts={callbackId:'same-callback'};
+ await worker.fetch(callbackRequest(id,0,'processing',opts),e);await worker.fetch(callbackRequest(id,0,'processing',opts),e);
+ await worker.fetch(callbackRequest(id,0,'cancelled'),e);await worker.fetch(callbackRequest(id,1,'completed'),e);
+ const row=e.sqlite.prepare('SELECT business_status,business_version FROM orders').get();assert.equal(row.business_status,'processing');assert.equal(row.business_version,1);
+ assert.equal(e.sqlite.prepare('SELECT COUNT(*) n FROM order_status_events').get().n,2);
+});
+test('cancellation asks for confirmation and terminal state cannot be reopened',async()=>{
+ const e={...env(),TELEGRAM_WEBHOOK_SECRET:WEBHOOK_SECRET},calls=managerMock();const {id}=await (await worker.fetch(await request(),e)).json();
+ await worker.fetch(callbackRequest(id,0,'ask_cancel'),e);assert.equal(e.sqlite.prepare('SELECT business_status FROM orders').get().business_status,'received');
+ const cancelButtons=calls.filter(c=>c.method==='editMessageReplyMarkup').at(-1).form.get('reply_markup');assert.match(cancelButtons,/Да, отменить заказ/);
+ await worker.fetch(callbackRequest(id,0,'cancelled'),e);await worker.fetch(callbackRequest(id,1,'processing'),e);
+ assert.equal(e.sqlite.prepare('SELECT business_status FROM orders').get().business_status,'cancelled');
+});
+test('simultaneous manager clicks commit a single transition',async()=>{
+ const e={...env(),TELEGRAM_WEBHOOK_SECRET:WEBHOOK_SECRET};managerMock();const {id}=await (await worker.fetch(await request(),e)).json();
+ await Promise.all([worker.fetch(callbackRequest(id,0,'processing'),e),worker.fetch(callbackRequest(id,0,'cancelled'),e)]);
+ assert.equal(e.sqlite.prepare('SELECT business_version FROM orders').get().business_version,1);
+ assert.equal(e.sqlite.prepare('SELECT COUNT(*) n FROM order_status_events').get().n,2);
+});
+test('bootstrap is protected and never overwrites an unrelated webhook',async()=>{
+ const e={...env(),TELEGRAM_WEBHOOK_SECRET:WEBHOOK_SECRET,ADMIN_SETUP_SECRET:WEBHOOK_SECRET};
+ const req=secret=>new Request('https://api.example/internal/telegram/setup',{method:'POST',headers:{authorization:'Bearer '+secret},body:'{}'});
+ assert.equal((await worker.fetch(req('bad'),e)).status,403);
+ const calls=telegramMock(method=>method==='getWebhookInfo'?Response.json({ok:true,result:{url:'https://other.example/webhook'}}):undefined);
+ assert.equal((await worker.fetch(req(WEBHOOK_SECRET),e)).status,409);assert(!calls.some(c=>c.method==='setWebhook'));
 });

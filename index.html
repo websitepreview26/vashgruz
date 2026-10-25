@@ -179,6 +179,15 @@ body{background:var(--bg)}.app-toolbar{display:flex;align-items:center;justify-c
 .photo-item button{position:absolute;right:5px;top:5px;border-radius:50%;background:#0f1b2acc;color:#fff;width:27px;height:27px;display:grid;place-items:center}
 .photo-item button svg{width:15px;height:15px}.photo-add{border:1px dashed var(--mut);display:flex;align-items:center;justify-content:center;flex-direction:column;gap:8px;color:var(--mut);font-size:12px}
 #go:disabled{opacity:.6}
+
+.order-status-panel{padding:20px 16px;background:var(--card);border:1px solid var(--line);border-radius:18px;margin-bottom:16px}
+.order-status-panel h2{font-size:21px;letter-spacing:-.4px}.order-status-panel>p{font-size:13px;color:var(--mut);line-height:1.5;margin-top:8px}
+.order-progress{display:flex;margin:24px -7px 16px}.order-progress>div{flex:1;text-align:center;position:relative;min-width:0}
+.order-progress i{position:relative;z-index:1;display:grid;place-items:center;width:20px;height:20px;background:var(--bg);border:2px solid var(--line);border-radius:50%;margin:0 auto 9px;font-style:normal;font-size:11px;color:var(--accx)}
+.order-progress>div:not(:last-child):after{content:'';position:absolute;top:9px;left:50%;width:100%;height:2px;background:var(--line)}
+.order-progress .reached i{background:var(--acc);border-color:var(--acc)}.order-progress .reached:not(.current):after{background:var(--acc)}
+.order-progress b{display:block;font-size:9px;font-weight:500;color:var(--mut)}.order-progress .reached b{color:var(--ink)}.order-progress small{display:block;font-size:8px;color:var(--mut);line-height:1.5;margin-top:5px}
+.status-updated{display:block;font-size:11px;color:var(--mut)}.cancelled h2,.status.cancelled{color:#cf6559}.sync-note{display:block;font-size:12px;color:var(--mut);padding:0 3px 15px;text-align:left}
 </style>
 </head>
 <body>
@@ -305,8 +314,55 @@ function wizard(){
  <p class="error" role="alert">${esc(S.submitError)}</p>${API_BASE?'':'<p class="fine">Демо-режим: отправка ещё не подключена.</p>'}`;
 }
 function ticket(w){const s=sv(w.sv);const rows=[['Услуга',s.n],['Задача',w.desc||'Без описания'],...((w.photos?.length||w.photoCount)?[['Фото',String(w.photos?.length||w.photoCount)+' шт.']]:[]),['Адрес',w.addr],['Условия',`${w.floor} этаж, ${w.lift?'есть лифт':'без лифта'}`],...(s.mv?[['Куда',w.to],['На выгрузке',`${w.toFloor} этаж, ${w.toLift?'есть лифт':'без лифта'}`]]:[]),...(w.dis?[['Разборка','Нужна']]:[]),['Когда',fd(w.date)+(w.date&&w.slot?', '+SLOTS[w.slot][0].toLowerCase():'')]];return `<div class="ticket">${rows.map(([a,b])=>`<div class="r"><span>${a}</span><b>${esc(b)}</b></div>`).join('')}<div class="r tot"><span>Стоимость</span><b style="font-size:16px">После оценки</b></div></div>`}
-function orders(){return `<div class="app-receipt-head"><h1>Заявки</h1><button data-a="tab" data-v="home">+ Новая</button></div>`+(S.orders.length?S.orders.map(o=>`<div class="ord"><div class="h"><span class="ib" style="--c:${sv(o.sv).c}">${ic(o.sv)}</span><div><b>${sv(o.sv).n}</b><br><small>№ ${esc(o.serverId||o.id)} · ${esc(fd(o.date))}</small></div></div><span class="status">${o.status==='sent'?'Отправлена':o.status==='demo'?'Демо-заявка':o.status==='prepared'?'Подготовлена':'Черновик'}</span><p class="sub" style="font-size:14px">${esc(o.desc)}</p><div class="order-foot"><button class="btn2" data-a="open-request" data-v="${esc(o.id)}">${o.status!=='draft'?'Открыть':'Продолжить'}</button><button class="review-edit" data-a="again" data-v="${esc(o.id)}">Повторить</button></div></div>`).join(''):`<div class="empty"><div class="ib">${ic('list')}</div><b style="color:var(--ink);font-size:18px">Заявок пока нет</b><p style="margin:6px 0 18px">Расскажите, с чем нужна помощь</p><button class="btn2" style="background:var(--acc);color:var(--accx)" data-a="tab" data-v="home">Выбрать услугу</button></div>`)}
-function done(){const o=S.last,sent=o.status==='sent';return `<div class="done"><div class="ring">${ic('check')}</div><h1>${sent?'Заявка отправлена':'Заявка создана'}</h1><p class="sub">№ ${esc(o.serverId||o.id.slice(-6))}</p></div><div class="app-status"><i></i>${sent?'Получена для расчёта':'Демо · сохранена на устройстве'}</div>${ticket(o)}<p class="fine">${sent?'Менеджер получил данные'+(o.photoCount?' и фотографии':'')+'. Стоимость и время согласуем отдельно.':'Отправка на расчёт пока не подключена.'}</p>${sent?'':'<button class="btn2" data-a="edit-last">Изменить заявку</button>'}`}
+const ORDER_STATES={
+ received:{title:'Получена',text:'Заявка доставлена. Менеджер скоро возьмёт её на оценку.'},
+ processing:{title:'На оценке',text:'Менеджер уточняет детали и рассчитывает стоимость.'},
+ confirmed:{title:'Заказ подтверждён',text:'Стоимость и время согласованы с вами.'},
+ completed:{title:'Выполнен',text:'Работа завершена. Спасибо, что выбрали нас!'},
+ cancelled:{title:'Отменён',text:'Заказ отменён.'}
+};
+const statusOf=o=>ORDER_STATES[o.businessStatus]||ORDER_STATES.received;
+const statusTime=t=>t?new Date(t).toLocaleString('ru-RU',{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'}):'';
+function orderProgress(o){
+ const state=o.businessStatus||'received',meta=statusOf(o);
+ const keys=['received','processing','confirmed','completed'],current=keys.indexOf(state);
+ return `<section class="order-status-panel ${state==='cancelled'?'cancelled':''}"><h2>${meta.title}</h2><p>${meta.text}</p>${state==='cancelled'?'':`<div class="order-progress">${keys.map((key,i)=>{const event=(o.history||[]).find(e=>e.status===key);return `<div class="${i<=current?'reached':''} ${i===current?'current':''}"><i>${i<current?'✓':''}</i><b>${['Получена','На оценке','Подтверждён','Выполнен'][i]}</b><small>${event?esc(statusTime(event.at)):''}</small></div>`}).join('')}</div>`}<small class="status-updated">${o.statusUpdatedAt?'Обновлено '+esc(statusTime(o.statusUpdatedAt)):''}</small></section>`;
+}
+let statusTimer=null,statusSync=null,lastStatusFetch=0,statusError='',statusLoading=false;
+function orders(){return `<div class="app-receipt-head"><h1>Заявки</h1><div><button data-a="refresh-orders" aria-label="Обновить статусы" style="margin-right:18px">↻</button><button data-a="tab" data-v="home">+ Новая</button></div></div>${statusError?`<button class="sync-note" data-a="refresh-orders">${esc(statusError)} · Повторить</button>`:statusLoading&&!S.orders.length?'<p class="hint" role="status">Загружаем заявки…</p>':''}`+(S.orders.length?S.orders.map(o=>`<div class="ord"><div class="h"><span class="ib" style="--c:${sv(o.sv).c}">${ic(o.sv)}</span><div><b>${sv(o.sv).n}</b><br><small>№ ${esc(o.serverId||o.id)} · ${esc(fd(o.date))}</small></div></div><span class="status ${o.businessStatus==='cancelled'?'cancelled':''}" role="status">${o.status==='sent'?statusOf(o).title:o.status==='demo'?'Демо-заявка':o.status==='prepared'?'Подготовлена':'Черновик'}</span><p class="sub" style="font-size:14px">${esc(o.desc||o.addr)}</p>${o.statusUpdatedAt?`<small>Обновлено ${esc(statusTime(o.statusUpdatedAt))}</small>`:''}<div class="order-foot"><button class="btn2" data-a="open-request" data-v="${esc(o.id)}">${o.status!=='draft'?'Открыть':'Продолжить'}</button><button class="review-edit" data-a="again" data-v="${esc(o.id)}">Повторить</button></div></div>`).join(''):statusLoading?'':`<div class="empty"><div class="ib">${ic('list')}</div><b style="color:var(--ink);font-size:18px">Заявок пока нет</b><p style="margin:6px 0 18px">Расскажите, с чем нужна помощь</p><button class="btn2" style="background:var(--acc);color:var(--accx)" data-a="tab" data-v="home">Выбрать услугу</button></div>`)}
+function done(){const o=S.last,sent=o.status==='sent';
+ if(sent)return `<div class="app-receipt-head"><h1>Заявка</h1><button data-a="refresh-orders" aria-label="Обновить статус">↻</button></div><p class="hint" style="margin-bottom:18px">№ ${esc(o.serverId||o.id)}</p>${orderProgress(o)}${statusError?`<button class="sync-note" data-a="refresh-orders">${esc(statusError)} · Повторить</button>`:''}${ticket(o)}`;
+ return `<div class="done"><div class="ring">${ic('check')}</div><h1>Заявка создана</h1><p class="sub">№ ${esc(o.id.slice(-6))}</p></div><div class="app-status"><i></i>Демо · сохранена на устройстве</div>${ticket(o)}<p class="fine">Отправка на расчёт пока не подключена.</p><button class="btn2" data-a="edit-last">Изменить заявку</button>`;
+}
+function statusScreen(){return !S.w&&(S.tab==='orders'||(S.tab==='done'&&S.last?.status==='sent'))}
+function scheduleStatuses(){
+ if(typeof window.setTimeout!=='function')return;
+ window.clearTimeout(statusTimer);statusTimer=null;
+ if(!API_BASE||!inTg||!tg.initData||document.hidden||!statusScreen()||statusSync)return;
+ const interval=statusError?30000:10000;
+ statusTimer=window.setTimeout(()=>syncOrders(),Math.max(0,interval-(Date.now()-lastStatusFetch)));
+}
+function mergeOrders(remote){
+ const requestIds=new Set(remote.map(o=>o.requestId));
+ const incoming=remote.map(o=>{const old=S.orders.find(x=>x.serverId===o.serverId||x.submitId===o.requestId);return {...old,...o,id:old?.id||o.serverId,submitId:o.requestId,photos:[],ownerId:String(user.id)}});
+ const local=S.orders.filter(o=>o.status!=='sent'&&!requestIds.has(o.submitId)&&(!o.ownerId||o.ownerId===String(user.id)));
+ S.orders=[...incoming,...local];
+ if(S.last?.serverId){const found=incoming.find(o=>o.serverId===S.last.serverId);if(found)S.last=found}
+ save();
+}
+async function syncOrders(){
+ if(statusSync||!API_BASE||!inTg||!tg.initData)return;
+ statusLoading=true;
+ statusSync=(async()=>{
+  try{
+   const response=await fetch(API_BASE+'/api/orders/list',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({initData:tg.initData}),signal:AbortSignal.timeout(15000)});
+   const data=await response.json();if(!response.ok||!data.ok||!Array.isArray(data.orders))throw new Error(response.status===401?'Откройте приложение заново':'Нет связи');
+   mergeOrders(data.orders);statusError='';
+  }catch(e){statusError=e.message==='Откройте приложение заново'?e.message:'Не удалось обновить статусы'}
+  finally{statusLoading=false;lastStatusFetch=Date.now();if(statusScreen()&&!S.sheet)render(true)}
+ })();
+ try{await statusSync}finally{statusSync=null;scheduleStatuses()}
+}
 function sheetHTML(){
  if(S.sheet==='svc')return `<div class="grab"></div><h3>Услуга</h3>${SV.map(s=>`<button class="opt" style="--c:${s.c}" data-a="pick" data-v="${s.id}" aria-pressed="${S.w.sv===s.id}"><span class="ib sm">${ic(s.id)}</span><div><b>${s.n}</b><small>${s.d}</small></div>${S.w.sv===s.id?ic('check'):''}</button>`).join('')}`;
  const {y,m}=S.cal,w=S.w,first=new Date(y,m,1),off=(first.getDay()+6)%7,n=new Date(y,m+1,0).getDate(),now=new Date();
@@ -348,7 +404,7 @@ function refresh(){if(S.w){$('#go').disabled=S.sending||S.preparing;$('#go').tex
 function storeDraft(status='draft'){
  const w=S.w;if(!w)return null;
  const id=w.id||String(Date.now()),photos=w.photos||[];w.photoCount=photos.length;
- const o={...w,photos:[],photoCount:photos.length,id,status,step:S.step,updatedAt:new Date().toISOString()};
+ const o={...w,photos:[],photoCount:photos.length,id,status,step:S.step,ownerId:String(user?.id||'local'),updatedAt:new Date().toISOString()};
  photoCache.set(id,photos);
  const i=S.orders.findIndex(x=>x.id===id);if(i<0)S.orders.unshift(o);else S.orders[i]=o;
  S.w.id=id;save();return o;
@@ -367,7 +423,7 @@ async function submitOrder(){
   const response=await fetch(API_BASE+'/api/orders',{method:'POST',body:form,signal:AbortSignal.timeout(90000)});
   const result=await response.json();
   if(!response.ok||!result.ok)throw new Error(result.message||'Не удалось отправить. Попробуйте ещё раз.');
-  const o=storeDraft('sent');o.serverId=result.id;save();
+  const o=storeDraft('sent');o.serverId=result.id;o.businessStatus=result.businessStatus||'received';o.statusUpdatedAt=result.statusUpdatedAt||Date.now();lastStatusFetch=0;save();
   S.last=o;S.w=null;S.tab='done';S.anim='af';hap('success');
  }catch(e){S.submitError=e.name==='TimeoutError'||e.name==='TypeError'?'Не удалось подтвердить отправку. Фото и данные сохранены — попробуйте повторно.':e.message}
  finally{S.sending=false;render()}
@@ -407,12 +463,13 @@ async function addPhotos(files){
   }
  }finally{S.preparing=false;if(S.w===w){storeDraft();render();$('#view').scrollTop=y}}
 }
-function render(){edgeBack.cancel();const wiz=!!S.w,v=$('#view');const active=document.activeElement;if(active&&v.contains(active)&&active.matches('input,textarea,select'))active.blur();v.className=S.anim;S.anim='';v.innerHTML=wiz?wizard():({home,orders,done}[S.tab]||home)();v.scrollTop=0;v.focus({preventScroll:true});$('#dock').hidden=!wiz&&S.tab!=='done';$('#tabs').hidden=wiz||S.tab==='done';if(!wiz&&S.tab==='done')$('#go').textContent='Мои заявки';document.querySelectorAll('#tabs button').forEach(b=>b.setAttribute('aria-current',b.dataset.v===S.tab));if(inTg)(wiz||S.tab==='done')?tg.BackButton.show():tg.BackButton.hide();if(wiz)refresh();$('#view').inert=S.sending;const pf=$('#photo-input');if(pf)pf.onchange=e=>addPhotos([...e.target.files])}
+function render(preserve=false){edgeBack.cancel();const oldScroll=$('#view').scrollTop;const wiz=!!S.w,v=$('#view');const active=document.activeElement;if(active&&v.contains(active)&&active.matches('input,textarea,select'))active.blur();v.className=S.anim;S.anim='';v.innerHTML=wiz?wizard():({home,orders,done}[S.tab]||home)();v.scrollTop=preserve?oldScroll:0;if(!preserve)v.focus({preventScroll:true});$('#dock').hidden=!wiz&&S.tab!=='done';$('#tabs').hidden=wiz||S.tab==='done';if(!wiz&&S.tab==='done')$('#go').textContent='Мои заявки';document.querySelectorAll('#tabs button').forEach(b=>b.setAttribute('aria-current',b.dataset.v===S.tab));if(inTg)(wiz||S.tab==='done')?tg.BackButton.show():tg.BackButton.hide();if(wiz)refresh();$('#view').inert=S.sending;const pf=$('#photo-input');if(pf)pf.onchange=e=>addPhotos([...e.target.files]);scheduleStatuses()}
 const keep=fn=>{const y=$('#view').scrollTop;fn();render();$('#view').scrollTop=y};
 document.addEventListener('click',e=>{const b=e.target.closest('[data-a]');if(!b)return;const a=b.dataset.a,v=b.dataset.v,k=b.dataset.k,w=S.w;if(S.sending||S.preparing)return;hap();
- if(a==='tab'){S.tab=v;S.anim='af';return render()}
+ if(a==='refresh-orders'){lastStatusFetch=0;return syncOrders()}
+ if(a==='tab'){if(v==='orders')lastStatusFetch=0;S.tab=v;S.anim='af';return render()}
  if(a==='start'){S.submitError='';S.photoError='';S.w=newW(v);S.step=0;S.errors={};S.anim='af';return render()}
- if(a==='again'||a==='open-request'){const o=S.orders.find(x=>x.id===v);if(!o)return;if(a==='open-request'&&o.status!=='draft'){S.last=o;S.tab='done';return render()}const cached=a==='again'?[]:photoCache.get(o.id)||[];S.photoError=a!=='again'&&o.photoCount&&!cached.length?'Фото из черновика нужно добавить заново.':'';S.submitError='';S.w={...newW(o.sv),...o,...(a==='again'?{id:null,serverId:null,submitId:null,date:'',slot:0}: {}),photos:cached};S.step=a==='again'?0:Math.min(o.step||0,2);S.errors={};return render()}
+ if(a==='again'||a==='open-request'){const o=S.orders.find(x=>x.id===v);if(!o)return;if(a==='open-request'&&o.status!=='draft'){S.last=o;S.tab='done';return render()}const cached=a==='again'?[]:photoCache.get(o.id)||[];S.photoError=a!=='again'&&o.photoCount&&!cached.length?'Фото из черновика нужно добавить заново.':'';S.submitError='';S.w={...newW(o.sv),...o,...(a==='again'?{id:null,serverId:null,submitId:null,businessStatus:null,history:[],statusUpdatedAt:null,date:'',slot:0}: {}),photos:cached};S.step=a==='again'?0:Math.min(o.step||0,2);S.errors={};return render()}
  if(a==='back')return back();
  if(a==='exit'){if(w.desc.trim()||w.addr.trim()||w.phone.trim())storeDraft();S.w=null;S.errors={};S.tab='home';S.anim='ab';return render()}
  if(a==='edit'){S.step=+v;S.errors={};return render()}
@@ -520,6 +577,8 @@ const edgeBack=(()=>{
 })();
 document.addEventListener('input',e=>{const f=e.target.dataset.f;if(f&&S.w){S.w[f]=e.target.value;if(S.errors[f]){delete S.errors[f];$('#err-'+f).textContent='';e.target.setAttribute('aria-invalid','false');e.target.closest('.fld')?.classList.remove('invalid')}refresh()}});
 document.addEventListener('keydown',e=>{if(!S.sheet)return;if(e.key==='Escape')return close();if(e.key==='Tab'){const items=[...document.querySelectorAll('#sheet button:not(:disabled), #sheet a')];const first=items[0],last=items[items.length-1];if(e.shiftKey&&document.activeElement===first){e.preventDefault();last.focus()}else if(!e.shiftKey&&document.activeElement===last){e.preventDefault();first.focus()}}});
+document.addEventListener('visibilitychange',()=>{if(!document.hidden)lastStatusFetch=0;scheduleStatuses()});
+if(inTg)tg.onEvent('activated',()=>{lastStatusFetch=0;scheduleStatuses()});
 render();
 </script>
 </body>

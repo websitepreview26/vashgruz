@@ -1,3 +1,4 @@
+import {createStatusService,statusKeyboard} from './statuses.mjs';
 // HTTP/FormData + Telegram API. Only persistence and env bindings are Cloudflare-specific.
 const MAX_BODY = 12 * 1024 * 1024;
 const MAX_PHOTO = 2 * 1024 * 1024;
@@ -85,8 +86,11 @@ export function orderMessage(w,id,user,photoCount){
 // A definitive Telegram error is safe to retry; a lost network response is ambiguous.
 async function telegram(env,method,body){
   let response,data;
-  try{response=await fetch(`https://api.telegram.org/bot${env.BOT_TOKEN}/${method}`,{method:'POST',body,signal:AbortSignal.timeout(25000)});data=await response.json()}
-  catch{throw new HttpError(409,'UNCERTAIN','Связь прервалась. Проверяем доставку; повторная отправка заблокирована, чтобы не создать дубликат.')}
+  const actualBody=[...body.values()].some(v=>v instanceof Blob)?body:new URLSearchParams([...body.entries()]);
+  try{response=await fetch(`https://api.telegram.org/bot${env.BOT_TOKEN}/${method}`,{method:'POST',body:actualBody,signal:AbortSignal.timeout(25000)})}
+  catch(e){const error=new HttpError(409,'UNCERTAIN','Связь прервалась. Проверяем доставку; повторная отправка заблокирована, чтобы не создать дубликат.');error.safeDiagnostic=e.name;throw error}
+  try{data=await response.json()}
+  catch{const error=new HttpError(409,'UNCERTAIN','Не удалось подтвердить ответ Telegram.');error.safeDiagnostic='HTTP '+response.status+', '+(response.headers.get('content-type')||'no content type');throw error}
   if(data.ok!==true){
     if(response.status>=500||Number(data.error_code)>=500)throw new HttpError(409,'UNCERTAIN','Не удалось подтвердить доставку. Заявка требует проверки.');
     throw new HttpError(502,'DELIVERY','Не удалось отправить заявку. Попробуйте ещё раз позже.');
@@ -95,20 +99,22 @@ async function telegram(env,method,body){
 }
 const bodyFor=env=>{const form=new FormData();form.set('chat_id',env.TELEGRAM_CHAT_ID);return form};
 const stmt=(env,sql,...args)=>env.DB.prepare(sql).bind(...args);
+const statusService=createStatusService({telegram,stmt,fail});
+const receipt=row=>({ok:true,id:row.id,photoCount:row.photo_count,businessStatus:row.business_status||'received',statusUpdatedAt:row.status_updated_at||row.updated_at});
 async function dispatch(env,row,w,user,photos){
-  if(row.state==='sent')return {ok:true,id:row.id,photoCount:row.photo_count};
+  if(row.state==='sent'){await statusService.received(env,row.id);return receipt(row)}
   if(['sending_text','sending_photos','uncertain'].includes(row.state))fail(409,'UNCERTAIN','Эта заявка уже отправляется или требует проверки доставки. Не создавайте её повторно.');
   let state=row.state,messageId=row.message_id;
   if(state==='received'){
     const lock=await stmt(env,"UPDATE orders SET state='sending_text', updated_at=? WHERE id=? AND state='received'",Date.now(),row.id).run();
     if(!lock.meta.changes)fail(409,'BUSY','Заявка уже отправляется. Подождите немного.');
-    const form=bodyFor(env);form.set('text',orderMessage(w,row.id,user,photos.length));form.set('protect_content','true');
+    const form=bodyFor(env);form.set('text',orderMessage(w,row.id,user,photos.length)+'\n\nСтатус: Получена');form.set('reply_markup',JSON.stringify(statusKeyboard(row)));form.set('protect_content','true');
     let result;
     try{result=await telegram(env,'sendMessage',form)}
     catch(e){await stmt(env,'UPDATE orders SET state=?,updated_at=? WHERE id=?',e.code==='DELIVERY'?'received':'uncertain',Date.now(),row.id).run();throw e}
     messageId=result.message_id;
     state=photos.length?'text_sent':'sent';
-    await stmt(env,'UPDATE orders SET state=?,message_id=?,updated_at=? WHERE id=?',state,messageId,Date.now(),row.id).run();
+    await stmt(env,'UPDATE orders SET state=?,message_id=?,updated_at=?,buttons_version=1 WHERE id=?',state,messageId,Date.now(),row.id).run();
   }
   if(state==='text_sent'){
     const lock=await stmt(env,"UPDATE orders SET state='sending_photos',updated_at=? WHERE id=? AND state='text_sent'",Date.now(),row.id).run();
@@ -126,7 +132,8 @@ async function dispatch(env,row,w,user,photos){
     const ids=messages.map(m=>m.photo?.at(-1)?.file_id).filter(Boolean);
     await stmt(env,"UPDATE orders SET state='sent',photo_file_ids=?,updated_at=? WHERE id=?",JSON.stringify(ids),Date.now(),row.id).run();
   }
-  return {ok:true,id:row.id,photoCount:photos.length};
+  await statusService.received(env,row.id);
+  return receipt(await stmt(env,'SELECT * FROM orders WHERE id=?',row.id).first());
 }
 export default {
   async fetch(request,env){
@@ -136,12 +143,18 @@ export default {
     const json=(data,status=200)=>new Response(JSON.stringify(data),{status,headers});
     try{
       const path=new URL(request.url).pathname;
-      if(path==='/health'&&request.method==='GET')return json({ok:true,configured:!!(env.DB&&env.BOT_TOKEN&&env.TELEGRAM_CHAT_ID)});
+      if(path==='/health'&&request.method==='GET')return json({ok:true,configured:!!(env.DB&&env.BOT_TOKEN&&env.TELEGRAM_CHAT_ID),statuses:!!env.TELEGRAM_WEBHOOK_SECRET});
+      if(path==='/telegram/webhook'||path==='/internal/telegram/setup'){
+        if(request.method!=='POST')fail(405,'METHOD','Метод не поддерживается.');
+        if(!env.DB||!env.BOT_TOKEN||!env.TELEGRAM_CHAT_ID)fail(503,'SETUP','Не настроено.');
+        return json(await (path==='/telegram/webhook'?statusService.webhook(request,env):statusService.setup(request,env)));
+      }
       if(!allowed||origin!==allowed)fail(403,'ORIGIN','Откройте мини-приложение через Telegram.');
       if(request.method==='OPTIONS')return new Response(null,{status:204,headers});
-      if(path!=='/api/orders')fail(404,'NOT_FOUND','Не найдено.');
+      if(!['/api/orders','/api/orders/list'].includes(path))fail(404,'NOT_FOUND','Не найдено.');
       if(request.method!=='POST')fail(405,'METHOD','Метод не поддерживается.');
       if(!env.DB||!env.BOT_TOKEN||!env.TELEGRAM_CHAT_ID)fail(503,'SETUP','Приём заявок ещё настраивается. Попробуйте позже.');
+      if(path==='/api/orders/list')return json(await statusService.list(request,env,validateInitData));
       const form=await boundedForm(request),user=await validateInitData(form.get('initData'),env.BOT_TOKEN);
       const requestId=form.get('requestId');
       if(typeof requestId!=='string'||!/^[a-zA-Z0-9_-]{16,80}$/.test(requestId))fail(400,'ID','Неверный номер запроса.');
