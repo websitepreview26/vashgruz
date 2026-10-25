@@ -185,7 +185,14 @@ export function createStatusService({telegram,stmt,fail}){
       const sender=message.from,c=message.contact;
       if(message.chat?.type==='private'&&Number.isSafeInteger(sender?.id)&&sender.id>0&&String(message.chat.id)===String(sender.id)&&c.user_id===sender.id){
         const digits=String(c.phone_number||'').replace(/\D/g,'');
-        if(/^[1-9]\d{8,14}$/.test(digits))await saveContact(env,sender,'+'+digits);
+        if(/^[1-9]\d{8,14}$/.test(digits)){
+          await saveContact(env,sender,'+'+digits);
+          // Delete only the sender's own contact, and only after durable storage.
+          if(Number.isSafeInteger(message.message_id)&&message.message_id>0){
+            const form=new FormData();form.set('chat_id',String(message.chat.id));form.set('message_id',String(message.message_id));
+            try{await telegram(env,'deleteMessage',form)}catch{}
+          }
+        }
       }
       return {ok:true};
     }

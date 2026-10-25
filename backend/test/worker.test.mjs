@@ -370,3 +370,23 @@ test('privacy rejection of contact button falls back to text with phone without 
  const notices=calls.filter(c=>c.method==='sendMessage');assert.equal(notices.length,2);assert.equal(notices[1].form.get('reply_markup'),null);assert.match(notices[1].form.get('text'),/Телефон:/);
  assert.equal(e.sqlite.prepare('SELECT business_status FROM orders').get().business_status,'accepted');
 });
+
+function ownContactUpdate({id=700,phone='375291234567',owner=42,chat=42}={}){
+ return new Request('https://api.example/telegram/webhook',{method:'POST',headers:{'X-Telegram-Bot-Api-Secret-Token':WEBHOOK_SECRET},body:JSON.stringify({message:{message_id:id,from:{id:42,first_name:'Тест'},chat:{id:chat,type:chat>0?'private':'group'},contact:{user_id:owner,phone_number:phone}}})});
+}
+test('own contact card is deleted from private chat only after phone has been saved',async()=>{
+ const e={...env(),TELEGRAM_WEBHOOK_SECRET:WEBHOOK_SECRET};const calls=telegramMock(method=>{
+  if(method==='deleteMessage')assert.equal(e.sqlite.prepare('SELECT phone FROM customer_contacts').get().phone,'+375291234567');
+ });
+ assert.equal((await worker.fetch(ownContactUpdate(),e)).status,200);
+ assert.deepEqual(calls.map(c=>c.method),['deleteMessage']);assert.equal(calls[0].form.get('chat_id'),'42');assert.equal(calls[0].form.get('message_id'),'700');
+ await worker.fetch(ownContactUpdate({owner:99}),e);await worker.fetch(ownContactUpdate({chat:-100}),e);await worker.fetch(ownContactUpdate({phone:'123'}),e);assert.equal(calls.length,1);
+});
+test('Telegram deletion failure does not lose phone or fail the contact webhook',async()=>{
+ const e={...env(),TELEGRAM_WEBHOOK_SECRET:WEBHOOK_SECRET};telegramMock(()=>Response.json({ok:false,error_code:400},{status:400}));
+ assert.equal((await worker.fetch(ownContactUpdate(),e)).status,200);assert.equal(e.sqlite.prepare('SELECT phone FROM customer_contacts').get().phone,'+375291234567');
+});
+test('contact card remains when saving phone fails',async()=>{
+ const e={...env(),TELEGRAM_WEBHOOK_SECRET:WEBHOOK_SECRET},calls=telegramMock();e.sqlite.exec('DROP TABLE customer_contacts');
+ assert.equal((await worker.fetch(ownContactUpdate(),e)).status,500);assert.equal(calls.length,0);
+});
