@@ -508,9 +508,9 @@ function contactControl(w){
  const manual=S.phoneManual||!canSharePhone();
  return `${canSharePhone()?`<button class="share-phone" data-a="share-phone" ${S.contactBusy?'disabled':''}>${ic('phone')}<span>${S.contactBusy?'Ожидаем номер…':'Поделиться номером'}</span></button><p class="hint">Telegram запросит ваше разрешение.</p>`:''}${manual?`<label class="field-label" for="phone">Телефон</label><div class="fld ${S.errors.phone?'invalid':''}">${ic('phone')}<input id="phone" data-f="phone" type="tel" inputmode="tel" autocomplete="tel" maxlength="25" enterkeyhint="done" aria-describedby="err-phone" aria-invalid="${!!S.errors.phone}" placeholder="+375 __ ___-__-__" value="${esc(w.phone)}"></div>`:'<button class="manual-phone" data-a="manual-phone">Ввести вручную</button>'}${error('phone')}<p class="error" role="alert">${esc(S.contactError)}</p>`;
 }
-async function fetchContact(){
- const response=await fetch(API_BASE+'/api/contact',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({initData:tg.initData}),signal:AbortSignal.timeout(12000)});
- const data=await response.json();if(!response.ok||!data.ok)throw Error('contact');return data;
+async function fetchContact(diagnostic){
+ const response=await fetch(API_BASE+'/api/contact',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({initData:tg.initData,...(diagnostic?{diagnostic}:{})}),signal:AbortSignal.timeout(12000)});
+ const data=await response.json();if(!response.ok||!data.ok)throw Error(data.code||'contact');return data;
 }
 async function loadContact(){
  if(!API_BASE||!inTg||!tg.initData)return;
@@ -519,8 +519,10 @@ async function loadContact(){
 async function requestPhone(){
  const w=S.w;if(!w||S.contactBusy||!canSharePhone())return;
  S.contactBusy=true;S.contactError='';render(true);
+ const diagnostic={stage:'requesting',platform:String(tg.platform||''),version:String(tg.version||'')};
  try{
   const result=await new Promise((resolve,reject)=>{const timer=setTimeout(()=>reject(Error('timeout')),45000);try{tg.requestContact((shared,event)=>{clearTimeout(timer);resolve({shared,event})})}catch(e){clearTimeout(timer);reject(e)}});
+  diagnostic.shared=!!result.shared;diagnostic.stage='confirmed';diagnostic.eventKeys=Object.keys(result.event||{}).join(',');diagnostic.responsePresent=!!result.event?.response;
   if(!result.shared){if(S.w===w)S.phoneManual=true;return}
   // Current Telegram SDK provides contact data as the callback's second argument.
   // This fills the same editable field as manual entry; it does not authenticate the user.
@@ -528,17 +530,19 @@ async function requestPhone(){
   if(!contact&&typeof result.event?.response==='string'){
    try{contact=JSON.parse(new URLSearchParams(result.event.response).get('contact'))}catch{}
   }
+  diagnostic.contactType=typeof contact;diagnostic.contactKeys=Object.keys(contact||{}).join(',');diagnostic.phonePresent=!!contact?.phone_number;
   const digits=String(contact?.phone_number||'').replace(/\D/g,'');
   let phone=(!contact?.user_id||String(contact.user_id)===String(user?.id))&&validPhone('+'+digits)?'+'+digits:'';
   // Older clients only return a boolean. Their contact arrives through the webhook.
   // A previously saved number for this authenticated user is also valid.
   for(let i=0;!phone&&i<15;i++){
-   try{const data=await fetchContact();if(validPhone(data.phone)){phone=data.phone;break}}catch{}
+   try{const data=await fetchContact();if(validPhone(data.phone)){phone=data.phone;break}}catch(e){diagnostic.error=e.message}
    if(i<14)await new Promise(resolve=>setTimeout(resolve,600));
   }
   if(!phone)throw Error('pending');
+  diagnostic.stage='filled';void fetchContact(diagnostic).catch(()=>{});
   cachePhone(phone);if(S.w===w){w.phone=phone;S.phoneManual=false;delete S.errors.phone;storeDraft()}
- }catch{if(S.w===w){S.phoneManual=true;S.contactError='Не удалось получить номер. Можно ввести его вручную.'}}
+ }catch(e){diagnostic.stage=e.message==='timeout'?'callback_timeout':'failed';diagnostic.error=diagnostic.error||e.message;void fetchContact(diagnostic).catch(()=>{});if(S.w===w){S.phoneManual=true;S.contactError='Не удалось получить номер. Можно ввести его вручную.'}}
  finally{S.contactBusy=false;if(S.w)render(true)}
 }
 function missingAddress(){if(!S.w||S.step!==1)return '';if(S.w.addr.trim().length<5)return sv(S.w.sv).mv?'Укажите адрес погрузки':'Укажите адрес';if(sv(S.w.sv).mv&&S.w.to.trim().length<5)return 'Укажите адрес выгрузки';return ''}

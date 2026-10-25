@@ -61,6 +61,13 @@ export function createStatusService({telegram,stmt,fail}){
   }
   async function contact(request,env,validateInitData){
     const data=await smallJson(request),user=await validateInitData(data.initData,env.BOT_TOKEN);
+    if(data.diagnostic&&typeof data.diagnostic==='object'){
+      const source=data.diagnostic,details={};
+      for(const key of ['stage','platform','version','eventKeys','contactKeys','contactType','error'])if(typeof source[key]==='string')details[key]=source[key].replace(/[^a-zA-Z_.,: -]/g,'').slice(0,180);
+      if(typeof source.version==='string'&&/^\d{1,2}\.\d{1,2}$/.test(source.version))details.version=source.version;
+      for(const key of ['shared','responsePresent','phonePresent'])if(typeof source[key]==='boolean')details[key]=source[key];
+      await stmt(env,'INSERT INTO contact_diagnostics(user_id,details,updated_at) VALUES(?,?,?) ON CONFLICT(user_id) DO UPDATE SET details=excluded.details,updated_at=excluded.updated_at',String(user.id),JSON.stringify(details),Date.now()).run();
+    }
     const row=await stmt(env,'SELECT phone,updated_at FROM customer_contacts WHERE user_id=?',String(user.id)).first();
     return {ok:true,phone:row?.phone||'',updatedAt:row?.updated_at||0,serverTime:Date.now()};
   }
@@ -225,6 +232,10 @@ export function createStatusService({telegram,stmt,fail}){
     const key=request.headers.get('authorization')?.replace(/^Bearer /,'');
     if(!secretMatches(key,env.ADMIN_SETUP_SECRET))fail(403,'SETUP_AUTH','Доступ запрещён.');
     const body=await smallJson(request);
+    if(body.action==='diagnostics'){
+      const info=await telegram(env,'getWebhookInfo',new FormData()),bot=await telegram(env,'getMe',new FormData());
+      return {ok:true,bot:bot.username,webhookMatches:info.url===new URL('/telegram/webhook',request.url).href,pending:info.pending_update_count||0,lastError:info.last_error_message||'',lastErrorAt:info.last_error_date||0,allowedUpdates:info.allowed_updates||[],contacts:(await stmt(env,'SELECT details,updated_at FROM contact_diagnostics ORDER BY updated_at DESC LIMIT 3').all()).results};
+    }
     if(body.action==='backfill'){
       const rows=(await stmt(env,"SELECT * FROM orders WHERE state='sent' AND message_id IS NOT NULL AND buttons_version=0 ORDER BY created_at DESC LIMIT 10").all()).results;
       let changed=0,failed=0;

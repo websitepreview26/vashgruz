@@ -152,7 +152,7 @@ test('Telegram native callback fills phone immediately without waiting for webho
  c.tg.requestContact=cb=>cb(true,{responseUnsafe:{contact:{user_id:42,phone_number:'375291234567'}}});
  c.context.fetch=async()=>{requests++;throw Error('Webhook delayed')};
  c.run("S.w=newW('trash');S.step=2;render()");
- await c.run('requestPhone()');assert.equal(c.run('S.w.phone'),'+375291234567');assert.equal(requests,0);assert.equal(c.node('#go').disabled,false);
+ await c.run('requestPhone()');assert.equal(c.run('S.w.phone'),'+375291234567');assert.equal(requests,1);assert.equal(c.node('#go').disabled,false);
 });
 test('raw Telegram callback contact can fill number and confirmed saved phone is not rejected for age',async()=>{
  const c=client({live:true});c.tg.requestContact=cb=>cb(true,{response:new URLSearchParams({contact:JSON.stringify({user_id:42,phone_number:'+375291234567'})}).toString()});

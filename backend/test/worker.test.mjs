@@ -30,6 +30,7 @@ function env(){
   sqlite.exec(readFileSync(new URL('../migrations/0004_quotes.sql',import.meta.url),'utf8'));
   sqlite.exec(readFileSync(new URL('../migrations/0005_order_organization.sql',import.meta.url),'utf8'));
   sqlite.exec(readFileSync(new URL('../migrations/0006_media_cards.sql',import.meta.url),'utf8'));
+  sqlite.exec(readFileSync(new URL('../migrations/0007_contact_diagnostics.sql',import.meta.url),'utf8'));
   return {MINI_APP_URL:'https://websitepreview26.github.io/vashgruz/',BOT_USERNAME:'vash_gruz_test_bot',BOT_TOKEN:TOKEN,TELEGRAM_CHAT_ID:'-100123456789',ALLOWED_ORIGIN:ORIGIN,DB:{
     prepare(sql){return {bind(...args){return {
       sql,args,
@@ -337,4 +338,11 @@ test('pre-upgrade partial delivery resumes photos linked to existing text card',
  const calls=telegramMock();assert.equal((await worker.fetch(await request({id,files:[photo()]}),e)).status,200);
  assert.deepEqual(calls.map(c=>c.method),['sendPhoto']);assert.equal(JSON.parse(calls[0].form.get('reply_parameters')).message_id,100);
  assert.equal(e.sqlite.prepare('SELECT message_kind FROM orders').get().message_kind,'text');
+});
+
+test('contact diagnostics require signed owner and never store phone or raw callback data',async()=>{
+ const e=env();const req=new Request('https://api.example/api/contact',{method:'POST',headers:{origin:ORIGIN},body:JSON.stringify({initData:await auth(),diagnostic:{stage:'failed',platform:'ios',version:'9.2',phone_number:'+375291234567',response:'private raw payload',shared:true,eventKeys:'status,response',phonePresent:false}})});
+ assert.equal((await worker.fetch(req,e)).status,200);
+ const stored=e.sqlite.prepare('SELECT details FROM contact_diagnostics').get().details;
+ assert(!stored.includes('375'));assert(!stored.includes('private raw'));assert.match(stored,/failed/);assert.match(stored,/9.2/);
 });
