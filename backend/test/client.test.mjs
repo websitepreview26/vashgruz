@@ -47,7 +47,7 @@ test('configured API sends form and files; only confirmed result produces succes
   assert.equal(calls[0].body.get('initData'),'signed-test-data');assert.match(calls[0].body.get('requestId'),/^[a-f\d-]{36}$/);
   finish(Response.json({ok:true,id:'VG-TEST',photoCount:0}));await pending;
   assert.equal(c.run('S.sending'),false);assert.equal(c.run('S.last.status'),'sent');assert.equal(c.run('S.last.serverId'),'VG-TEST');
-  assert.match(c.node('#view').innerHTML,/<h2>Получена<\/h2>/);
+  assert.match(c.node('#view').innerHTML,/<h2>Заявка на оценку получена<\/h2>/);
 });
 test('failure preserves photos and uses same request ID on retry',async()=>{
   const calls=[];const c=client({live:true,fetcher:async(url,opts)=>{calls.push(opts.body);return Response.json({ok:false,message:'Попробуйте позже'},{status:502})}});
@@ -114,4 +114,18 @@ test('Telegram phone sharing fills contact without a name field and caches numbe
 test('declining Telegram contact opens manual option without inventing a number',async()=>{
  const c=client({live:true});c.tg.requestContact=cb=>cb(false);c.run("S.w=newW('trash');S.step=2;render()");
  await c.run('requestPhone()');assert.equal(c.run('S.w.phone'),'');assert.equal(c.run('S.phoneManual'),true);assert.equal(c.run('S.contactBusy'),false);assert.match(c.node('#view').innerHTML,/id="phone"/);assert(c.node('#go').disabled);
+});
+
+test('quote is shown as a proposal; agreeing sends versioned decision rather than completing work',async()=>{
+ const base={sv:'trash',desc:'Диван',addr:'Минск, Ленина 1',to:'',floor:1,toFloor:1,lift:true,toLift:true,dis:false,date:'',slot:0,name:'',phone:'+375291234567',id:'local',serverId:'VG-TEST',status:'sent',businessStatus:'quoted',statusVersion:2,quote:{amountMinor:15050,note:'Машина и вынос включены',revision:1}};
+ const calls=[];const c=client({live:true,fetcher:async(url,opts)=>{calls.push(JSON.parse(opts.body));return Response.json({ok:true,order:{...base,businessStatus:'accepted',statusVersion:3}})}});
+ c.context.proposal=base;c.run("S.orders=[proposal];S.last=proposal;S.tab='done';render()");
+ assert.equal(c.node('#go').textContent,'Подходит, согласовать');assert.match(c.node('#view').innerHTML,/Машина и вынос включены/);assert(!c.node('#view').innerHTML.includes('Выполнен'));
+ await c.node('#go').onclick();assert.equal(calls[0].action,'accept');assert.equal(calls[0].version,2);assert.equal(c.run('S.last.businessStatus'),'accepted');assert.match(c.node('#view').innerHTML,/Стоимость принята/);
+});
+test('a changed quote is refreshed and never accepted automatically',async()=>{
+ const proposal={sv:'trash',desc:'Диван',addr:'Минск, Ленина 1',date:'',id:'local',serverId:'VG-TEST',status:'sent',businessStatus:'quoted',statusVersion:2,quote:{amountMinor:15000,note:'',revision:1}};
+ let decisions=0;const c=client({live:true,fetcher:async(url)=>url.endsWith('/decision')?(decisions++,Response.json({ok:false,code:'QUOTE_CHANGED',message:'Предложение изменилось.'},{status:409})):Response.json({ok:true,orders:[{...proposal,statusVersion:3,quote:{amountMinor:18000,note:'Уточнён объём',revision:2}}]})});
+ c.context.proposal=proposal;c.run("S.orders=[proposal];S.last=proposal;S.tab='done';render()");await c.run("decideQuote('accept')");
+ assert.equal(decisions,1);assert.equal(c.run('S.last.businessStatus'),'quoted');assert.equal(c.run('S.last.quote.amountMinor'),18000);assert.equal(c.run('S.last.statusVersion'),3);
 });

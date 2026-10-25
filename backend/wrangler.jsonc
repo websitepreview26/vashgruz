@@ -5,6 +5,8 @@
   "compatibility_date": "2026-10-25",
   "workers_dev": true,
   "vars": {
+    "MINI_APP_URL": "https://websitepreview26.github.io/vashgruz/",
+    "BOT_USERNAME": "vash_gruz_test_bot",
     "ALLOWED_ORIGIN": "https://websitepreview26.github.io"
   },
   "d1_databases": [{

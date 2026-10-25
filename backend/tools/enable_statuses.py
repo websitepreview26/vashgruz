@@ -5,6 +5,7 @@ import os
 import secrets
 import subprocess
 import sys
+import time
 
 sys.dont_write_bytecode = True
 from connect_telegram import ACCOUNT_ID, ROOT, WORKER_URL, runtime
@@ -37,11 +38,17 @@ fetch(d.url,{method:'POST',headers:{authorization:'Bearer '+d.key,'content-type'
 
     def call(body):
         payload = json.dumps({"url": WORKER_URL + "/internal/telegram/setup", "key": admin_key, "body": body})
-        r = subprocess.run([cli[0], "-e", source], input=payload, capture_output=True, text=True, timeout=95)
-        try:
-            data = json.loads(r.stdout)
-        except ValueError:
-            raise SystemExit("Worker не подтвердил настройку. Секреты не выводятся.")
+        for attempt in range(7):
+            r = subprocess.run([cli[0], "-e", source], input=payload, capture_output=True, text=True, timeout=95)
+            try:
+                data = json.loads(r.stdout)
+            except ValueError:
+                raise SystemExit("Worker не подтвердил настройку. Секреты не выводятся.")
+            # Secret updates can reach the nearest edge slightly later than the CLI response.
+            if data.get("code") == "SETUP_AUTH" and attempt < 6:
+                time.sleep(attempt + 1)
+                continue
+            break
         if r.returncode or not data.get("ok"):
             raise SystemExit(data.get("message", "Настройка не завершена."))
         return data

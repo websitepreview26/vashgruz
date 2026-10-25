@@ -75,7 +75,7 @@ async function boundedForm(request){
 export function orderMessage(w,id,user,photoCount){
   const floor=(f,l)=>`${f} этаж, ${l?'есть лифт':'без лифта'}`;
   return [
-    `Новая заявка ${id}`,names[w.sv],w.desc||'Без описания',
+    `Заявка на оценку ${id}`,names[w.sv],w.desc||'Без описания',
     `Адрес: ${w.addr}`,floor(w.floor,w.lift),
     ...((w.sv==='flat'||w.sv==='office')?[`Куда: ${w.to}`,floor(w.toFloor,w.toLift)]:[]),
     ...(w.dis?['Нужна разборка']:[]),`Когда: ${w.date||'По согласованию'}${w.date?', '+slots[w.slot]:''}`,
@@ -92,6 +92,7 @@ async function telegram(env,method,body){
   try{data=await response.json()}
   catch{const error=new HttpError(409,'UNCERTAIN','Не удалось подтвердить ответ Telegram.');error.safeDiagnostic='HTTP '+response.status+', '+(response.headers.get('content-type')||'no content type');throw error}
   if(data.ok!==true){
+    if(method.startsWith('editMessage')&&Number(data.error_code)===400&&/message is not modified/i.test(String(data.description||'')))return true;
     if(response.status>=500||Number(data.error_code)>=500)throw new HttpError(409,'UNCERTAIN','Не удалось подтвердить доставку. Заявка требует проверки.');
     throw new HttpError(502,'DELIVERY','Не удалось отправить заявку. Попробуйте ещё раз позже.');
   }
@@ -114,7 +115,7 @@ async function dispatch(env,row,w,user,photos){
     catch(e){await stmt(env,'UPDATE orders SET state=?,updated_at=? WHERE id=?',e.code==='DELIVERY'?'received':'uncertain',Date.now(),row.id).run();throw e}
     messageId=result.message_id;
     state=photos.length?'text_sent':'sent';
-    await stmt(env,'UPDATE orders SET state=?,message_id=?,updated_at=?,buttons_version=1 WHERE id=?',state,messageId,Date.now(),row.id).run();
+    await stmt(env,'UPDATE orders SET state=?,message_id=?,updated_at=?,buttons_version=1,manager_text=? WHERE id=?',state,messageId,Date.now(),orderMessage(w,row.id,user,photos.length),row.id).run();
   }
   if(state==='text_sent'){
     const lock=await stmt(env,"UPDATE orders SET state='sending_photos',updated_at=? WHERE id=? AND state='text_sent'",Date.now(),row.id).run();
@@ -151,10 +152,11 @@ export default {
       }
       if(!allowed||origin!==allowed)fail(403,'ORIGIN','Откройте мини-приложение через Telegram.');
       if(request.method==='OPTIONS')return new Response(null,{status:204,headers});
-      if(!['/api/orders','/api/orders/list','/api/contact'].includes(path))fail(404,'NOT_FOUND','Не найдено.');
+      if(!['/api/orders','/api/orders/list','/api/contact','/api/orders/decision'].includes(path))fail(404,'NOT_FOUND','Не найдено.');
       if(request.method!=='POST')fail(405,'METHOD','Метод не поддерживается.');
       if(!env.DB||!env.BOT_TOKEN||!env.TELEGRAM_CHAT_ID)fail(503,'SETUP','Приём заявок ещё настраивается. Попробуйте позже.');
       if(path==='/api/orders/list')return json(await statusService.list(request,env,validateInitData));
+      if(path==='/api/orders/decision')return json(await statusService.decision(request,env,validateInitData));
       if(path==='/api/contact')return json(await statusService.contact(request,env,validateInitData));
       const form=await boundedForm(request),user=await validateInitData(form.get('initData'),env.BOT_TOKEN);
       const requestId=form.get('requestId');

@@ -197,6 +197,9 @@ body{background:var(--bg)}.app-toolbar{display:flex;align-items:center;justify-c
 .share-phone:disabled{opacity:.6}.manual-phone{display:block;margin:18px auto 8px;font-size:14px;color:var(--mut);text-decoration:underline}
 .contact-number{display:flex;align-items:center;gap:12px;padding:17px 14px;background:var(--card);border:1px solid var(--line);border-radius:16px}
 .contact-number>span{width:34px;height:34px;display:grid;place-items:center;border-radius:50%;background:#2fb86b20;color:#2fb86b}.contact-number>div{flex:1;min-width:0}.contact-number b{display:block;font-size:16px}.contact-number small{display:block;color:var(--mut);font-size:11px;margin-top:5px}.contact-number button{font-size:12px;color:var(--mut)}
+
+.quote-card{margin-bottom:16px;padding:20px 16px;background:var(--card);border:1px solid var(--acc);border-radius:18px}
+.quote-card>small{font-size:12px;color:var(--mut)}.quote-card>strong{display:block;margin:10px 0;font-size:34px;letter-spacing:-1px;line-height:1.2}.quote-note{font-size:14px;line-height:1.6;white-space:pre-line;overflow-wrap:anywhere}.quote-card .btn2{background:var(--bg)}.quote-card textarea{font-size:15px;padding:12px 0;min-height:88px}.list-quote{display:block;font-size:20px;margin-top:12px}
 </style>
 </head>
 <body>
@@ -280,22 +283,25 @@ const fd = (s, long) => !s ? 'По согласованию' : new Date(s+'T12:0
 const user = tg && tg.initDataUnsafe && tg.initDataUnsafe.user;
 const API_BASE=String(window.VG_CONFIG?.apiBase||'').replace(/\/$/,'');
 const photoCache=new Map();
-let S = {tab:'home', w:null, step:0, last:null, sheet:null, cal:null, anim:'', orders:[], errors:{},sending:false,preparing:false,contactBusy:false,phoneManual:false,contactError:'',photoError:'',submitError:''};
+let S = {tab:'home', w:null, step:0, last:null, sheet:null, cal:null, anim:'', orders:[], errors:{},sending:false,preparing:false,contactBusy:false,phoneManual:false,contactError:'',discussing:false,discussionText:'',discussionVersion:null,decisionError:'',photoError:'',submitError:''};
 try {
  const current=localStorage.getItem('vg-requests-v2');
  if(current){const o=JSON.parse(current);if(Array.isArray(o))S.orders=o}
  else {const old=JSON.parse(localStorage.getItem('vg-orders')||'[]');if(Array.isArray(old))S.orders=old.map(o=>({...o,status:'draft',step:0,toFloor:1,toLift:true,slot:Math.max(0,SLOTS.findIndex(s=>s[0]===o.slot))}))}
 } catch(e){}
+const linkedOrder=tg?.initDataUnsafe?.start_param|| (window.location?.search?'order_'+new URLSearchParams(window.location.search).get('order'):'');
+let pendingOrderId=/^order_(VG-[A-F0-9]{12})$/.exec(linkedOrder)?.[1]||null;
+if(pendingOrderId)S.tab='orders';
 const newW = id => ({photos:[],sv:id||'trash',desc:'',addr:'',to:'',floor:1,lift:true,toFloor:1,toLift:true,dis:false,date:'',slot:0,name:user?user.first_name:'',phone:cachedPhone()});
 function save(){try{localStorage.setItem('vg-requests-v2',JSON.stringify(S.orders));return true}catch(e){return false}}
 const TABS = [['home','Заказ','truck'],['orders','Заявки','list']];
 $('#tabs').innerHTML = TABS.map(t => `<button data-a="tab" data-v="${t[0]}">${ic(t[2])}${t[1]}</button>`).join('');
 if (inTg) tg.BackButton.onClick(back);
-function back(animated=true){if(S.sending||S.preparing)return;hap();if(S.sheet)return close();S.errors={};S.anim=animated===false?'':'ab';if(S.w&&S.step>0)S.step--;else{if(S.w&&(S.w.desc.trim()||S.w.addr.trim()))storeDraft();const wasDone=S.tab==='done';S.w=null;S.tab=wasDone?'orders':'home'}render()}
+function back(animated=true){if(S.sending||S.preparing)return;hap();if(S.discussing){S.discussing=false;return render(true)}if(S.sheet)return close();S.errors={};S.anim=animated===false?'':'ab';if(S.w&&S.step>0)S.step--;else{if(S.w&&(S.w.desc.trim()||S.w.addr.trim()))storeDraft();const wasDone=S.tab==='done';S.w=null;S.tab=wasDone?'orders':'home'}render()}
 function home(){
  const draft=S.orders.find(o=>o.status==='draft');
  return `<div class="hrow"><h1>Что нужно вывезти<br>или перевезти?</h1></div>
- ${draft?`<button class="quick-row resume" data-a="open-request" data-v="${esc(draft.id)}">${ic('list')}<div><b>Продолжить заказ</b><small>${esc(sv(draft.sv).n)}</small></div>${ic('chev')}</button>`:''}
+ ${draft?`<button class="quick-row resume" data-a="open-request" data-v="${esc(draft.id)}">${ic('list')}<div><b>Продолжить оценку</b><small>${esc(sv(draft.sv).n)}</small></div>${ic('chev')}</button>`:''}
  <div class="sec home-section"><b>Услуги</b><small>цена за час</small></div>
  <div class="grid">${SV.map(s=>`<button class="svc" style="--c:${s.c}" data-a="start" data-v="${s.id}"><span class="bg">${ic(s.id)}</span><span class="ib">${ic(s.id)}</span><b>${s.n}</b><small>${s.r?'от '+s.r+' BYN':'по оценке'}</small></button>`).join('')}</div>`;
 }
@@ -323,26 +329,50 @@ function wizard(){
  <div class="sec"><b>Ваша задача</b><button class="review-edit" data-a="edit" data-v="0">Изменить</button></div>${ticket(w)}
  <p class="error" role="alert">${esc(S.submitError)}</p>${API_BASE?'':'<p class="fine">Демо-режим: отправка ещё не подключена.</p>'}`;
 }
-function ticket(w){const s=sv(w.sv);const rows=[['Услуга',s.n],['Задача',w.desc||'Без описания'],...((w.photos?.length||w.photoCount)?[['Фото',String(w.photos?.length||w.photoCount)+' шт.']]:[]),['Адрес',w.addr],['Условия',`${w.floor} этаж, ${w.lift?'есть лифт':'без лифта'}`],...(s.mv?[['Куда',w.to],['На выгрузке',`${w.toFloor} этаж, ${w.toLift?'есть лифт':'без лифта'}`]]:[]),...(w.dis?[['Разборка','Нужна']]:[]),['Когда',fd(w.date)+(w.date&&w.slot?', '+SLOTS[w.slot][0].toLowerCase():'')]];return `<div class="ticket">${rows.map(([a,b])=>`<div class="r"><span>${a}</span><b>${esc(b)}</b></div>`).join('')}<div class="r tot"><span>Стоимость</span><b style="font-size:16px">После оценки</b></div></div>`}
+function ticket(w){const s=sv(w.sv);const rows=[['Услуга',s.n],['Задача',w.desc||'Без описания'],...((w.photos?.length||w.photoCount)?[['Фото',String(w.photos?.length||w.photoCount)+' шт.']]:[]),['Адрес',w.addr],['Условия',`${w.floor} этаж, ${w.lift?'есть лифт':'без лифта'}`],...(s.mv?[['Куда',w.to],['На выгрузке',`${w.toFloor} этаж, ${w.toLift?'есть лифт':'без лифта'}`]]:[]),...(w.dis?[['Разборка','Нужна']]:[]),['Когда',fd(w.date)+(w.date&&w.slot?', '+SLOTS[w.slot][0].toLowerCase():'')]];return `<div class="ticket">${rows.map(([a,b])=>`<div class="r"><span>${a}</span><b>${esc(b)}</b></div>`).join('')}<div class="r tot"><span>${w.quote?'Предложение':'Стоимость'}</span><b style="font-size:16px">${w.quote?quoteMoney(w.quote.amountMinor):'После оценки'}</b></div></div>`}
 const ORDER_STATES={
- received:{title:'Получена',text:'Заявка доставлена. Менеджер скоро возьмёт её на оценку.'},
- processing:{title:'На оценке',text:'Менеджер уточняет детали и рассчитывает стоимость.'},
- confirmed:{title:'Заказ подтверждён',text:'Стоимость и время согласованы с вами.'},
- completed:{title:'Выполнен',text:'Работа завершена. Спасибо, что выбрали нас!'},
- cancelled:{title:'Отменён',text:'Заказ отменён.'}
+ received:{title:'Заявка на оценку получена',short:'Получена',text:'Оценим задачу и предложим стоимость. Заказ пока не подтверждён.'},
+ processing:{title:'На оценке',text:'Менеджер изучает задачу. Здесь появятся цена и условия.'},
+ quoted:{title:'Предложение готово',text:'Посмотрите стоимость и условия. Решение за вами.'},
+ discussion:{title:'Уточняем условия',text:'Ваш запрос передан менеджеру. Он свяжется с вами или обновит предложение.'},
+ accepted:{title:'Стоимость принята',text:'Вы согласились с предложением. Менеджер свяжется с вами, чтобы согласовать время и детали.'},
+ cancelled:{title:'Заявка закрыта',text:'Оценка закрыта. При необходимости можно отправить новую задачу.'},
+ confirmed:{title:'Согласовано ранее',text:'Архивная заявка из предыдущей версии.'},
+ completed:{title:'Архив',text:'Архивная заявка из предыдущей версии.'}
 };
 const statusOf=o=>ORDER_STATES[o.businessStatus]||ORDER_STATES.received;
 const statusTime=t=>t?new Date(t).toLocaleString('ru-RU',{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'}):'';
 function orderProgress(o){
  const state=o.businessStatus||'received',meta=statusOf(o);
- const keys=['received','processing','confirmed','completed'],current=keys.indexOf(state);
- return `<section class="order-status-panel ${state==='cancelled'?'cancelled':''}"><h2>${meta.title}</h2><p>${meta.text}</p>${state==='cancelled'?'':`<div class="order-progress">${keys.map((key,i)=>{const event=(o.history||[]).find(e=>e.status===key);return `<div class="${i<=current?'reached':''} ${i===current?'current':''}"><i>${i<current?'✓':''}</i><b>${['Получена','На оценке','Подтверждён','Выполнен'][i]}</b><small>${event?esc(statusTime(event.at)):''}</small></div>`}).join('')}</div>`}<small class="status-updated">${o.statusUpdatedAt?'Обновлено '+esc(statusTime(o.statusUpdatedAt)):''}</small></section>`;
+ const keys=['received','processing','quoted','accepted'],current=state==='discussion'?1:keys.indexOf(state);
+ return `<section class="order-status-panel ${state==='cancelled'?'cancelled':''}"><h2>${meta.title}</h2><p>${meta.text}</p>${['cancelled','confirmed','completed'].includes(state)?'':`<div class="order-progress">${keys.map((key,i)=>{const event=[...(o.history||[])].reverse().find(e=>e.status===key);return `<div class="${i<=current?'reached':''} ${i===current?'current':''}"><i>${i<current?'✓':''}</i><b>${['Получена','На оценке','Предложение','Цена принята'][i]}</b><small>${event?esc(statusTime(event.at)):''}</small></div>`}).join('')}</div>`}<small class="status-updated">${o.statusUpdatedAt?'Обновлено '+esc(statusTime(o.statusUpdatedAt)):''}</small></section>`;
 }
 let statusTimer=null,statusSync=null,lastStatusFetch=0,statusError='',statusLoading=false;
-function orders(){return `<div class="app-receipt-head"><h1>Заявки</h1><div><button data-a="refresh-orders" aria-label="Обновить статусы" style="margin-right:18px">↻</button><button data-a="tab" data-v="home">+ Новая</button></div></div>${statusError?`<button class="sync-note" data-a="refresh-orders">${esc(statusError)} · Повторить</button>`:statusLoading&&!S.orders.length?'<p class="hint" role="status">Загружаем заявки…</p>':''}`+(S.orders.length?S.orders.map(o=>`<div class="ord"><div class="h"><span class="ib" style="--c:${sv(o.sv).c}">${ic(o.sv)}</span><div><b>${sv(o.sv).n}</b><br><small>№ ${esc(o.serverId||o.id)} · ${esc(fd(o.date))}</small></div></div><span class="status ${o.businessStatus==='cancelled'?'cancelled':''}" role="status">${o.status==='sent'?statusOf(o).title:o.status==='demo'?'Демо-заявка':o.status==='prepared'?'Подготовлена':'Черновик'}</span><p class="sub" style="font-size:14px">${esc(o.desc||o.addr)}</p>${o.statusUpdatedAt?`<small>Обновлено ${esc(statusTime(o.statusUpdatedAt))}</small>`:''}<div class="order-foot"><button class="btn2" data-a="open-request" data-v="${esc(o.id)}">${o.status!=='draft'?'Открыть':'Продолжить'}</button><button class="review-edit" data-a="again" data-v="${esc(o.id)}">Повторить</button></div></div>`).join(''):statusLoading?'':`<div class="empty"><div class="ib">${ic('list')}</div><b style="color:var(--ink);font-size:18px">Заявок пока нет</b><p style="margin:6px 0 18px">Расскажите, с чем нужна помощь</p><button class="btn2" style="background:var(--acc);color:var(--accx)" data-a="tab" data-v="home">Выбрать услугу</button></div>`)}
+function orders(){return `<div class="app-receipt-head"><h1>Заявки</h1><div><button data-a="refresh-orders" aria-label="Обновить статусы" style="margin-right:18px">↻</button><button data-a="tab" data-v="home">+ Новая</button></div></div>${statusError?`<button class="sync-note" data-a="refresh-orders">${esc(statusError)} · Повторить</button>`:statusLoading&&!S.orders.length?'<p class="hint" role="status">Загружаем заявки…</p>':''}`+(S.orders.length?S.orders.map(o=>`<div class="ord"><div class="h"><span class="ib" style="--c:${sv(o.sv).c}">${ic(o.sv)}</span><div><b>${sv(o.sv).n}</b><br><small>№ ${esc(o.serverId||o.id)} · ${esc(fd(o.date))}</small></div></div><span class="status ${o.businessStatus==='cancelled'?'cancelled':''}" role="status">${o.status==='sent'?(statusOf(o).short||statusOf(o).title):o.status==='demo'?'Демо-заявка':o.status==='prepared'?'Подготовлена':'Черновик'}</span>${o.status==='sent'&&o.quote?`<b class="list-quote">${quoteMoney(o.quote.amountMinor)}</b>`:''}<p class="sub" style="font-size:14px">${esc(o.desc||o.addr)}</p>${o.statusUpdatedAt?`<small>Обновлено ${esc(statusTime(o.statusUpdatedAt))}</small>`:''}<div class="order-foot"><button class="btn2" data-a="open-request" data-v="${esc(o.id)}">${o.status!=='draft'?'Открыть':'Продолжить'}</button><button class="review-edit" data-a="again" data-v="${esc(o.id)}">Повторить</button></div></div>`).join(''):statusLoading?'':`<div class="empty"><div class="ib">${ic('list')}</div><b style="color:var(--ink);font-size:18px">Заявок пока нет</b><p style="margin:6px 0 18px">Расскажите, с чем нужна помощь</p><button class="btn2" style="background:var(--acc);color:var(--accx)" data-a="tab" data-v="home">Выбрать услугу</button></div>`)}
 function done(){const o=S.last,sent=o.status==='sent';
- if(sent)return `<div class="app-receipt-head"><h1>Заявка</h1><button data-a="refresh-orders" aria-label="Обновить статус">↻</button></div><p class="hint" style="margin-bottom:18px">№ ${esc(o.serverId||o.id)}</p>${orderProgress(o)}${statusError?`<button class="sync-note" data-a="refresh-orders">${esc(statusError)} · Повторить</button>`:''}${ticket(o)}`;
+ if(sent)return `<div class="app-receipt-head"><h1>Заявка</h1><button data-a="refresh-orders" aria-label="Обновить статус">↻</button></div><p class="hint" style="margin-bottom:18px">№ ${esc(o.serverId||o.id)}</p>${orderProgress(o)}${quoteCard(o)}${statusError?`<button class="sync-note" data-a="refresh-orders">${esc(statusError)} · Повторить</button>`:''}${ticket(o)}`;
  return `<div class="done"><div class="ring">${ic('check')}</div><h1>Заявка создана</h1><p class="sub">№ ${esc(o.id.slice(-6))}</p></div><div class="app-status"><i></i>Демо · сохранена на устройстве</div>${ticket(o)}<p class="fine">Отправка на расчёт пока не подключена.</p><button class="btn2" data-a="edit-last">Изменить заявку</button>`;
+}
+function quoteMoney(minor){return (Number(minor)/100).toLocaleString('ru-RU',{maximumFractionDigits:2})+' BYN'}
+function quoteCard(o){
+ if(!o.quote)return '';
+ const current=o.businessStatus==='quoted';
+ return `<section class="quote-card"><small>${o.businessStatus==='discussion'?'Предыдущее предложение':'Предложение по вашей задаче'}</small><strong>${quoteMoney(o.quote.amountMinor)}</strong>${o.quote.note?`<p class="quote-note">${esc(o.quote.note)}</p>`:''}${current?S.discussing?`<label class="field-label" for="discussion-note">Что хотите уточнить? <span style="font-weight:400;color:var(--mut)">· необязательно</span></label><div class="card input-card"><textarea id="discussion-note" data-quote-note maxlength="400" placeholder="Например: можно ли снизить цену, если помогу с погрузкой?">${esc(S.discussionText)}</textarea></div><button class="btn2" data-a="cancel-discussion">Назад к предложению</button>`:`<button class="btn2" data-a="discuss-quote">Уточнить условия</button><p class="fine">Если цена или условия не подходят, обсудим варианты.</p>`:''}${S.decisionError?`<p class="error" role="alert">${esc(S.decisionError)}</p>`:''}</section>`;
+}
+const decisionIds=new Map();
+async function decideQuote(action){
+ const o=S.last;if(S.sending||!o?.quote||o.businessStatus!=='quoted')return;
+ const version=action==='discuss'?S.discussionVersion:o.statusVersion,key=o.serverId+':'+version+':'+action;
+ if(!decisionIds.has(key))decisionIds.set(key,crypto.randomUUID());
+ S.sending=true;S.decisionError='';render(true);let changed=false;
+ try{
+  const response=await fetch(API_BASE+'/api/orders/decision',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({initData:tg.initData,id:o.serverId,version,action,actionId:decisionIds.get(key),note:action==='discuss'?S.discussionText:''}),signal:AbortSignal.timeout(30000)});
+  const data=await response.json();
+  if(!response.ok||!data.ok){changed=data.code==='QUOTE_CHANGED';throw new Error(data.message||'Не удалось передать решение. Попробуйте ещё раз.')}
+  const updated={...o,...data.order,id:o.id};S.orders=S.orders.map(x=>x.serverId===o.serverId?updated:x);S.last=updated;S.discussing=false;S.discussionText='';save();hap('success');
+ }catch(e){S.decisionError=e.name==='TypeError'||e.name==='TimeoutError'?'Не удалось подтвердить действие. Попробуйте повторно.':e.message}
+ finally{S.sending=false;render(true)}
+ if(changed){S.discussing=false;lastStatusFetch=0;await syncOrders()}
 }
 function statusScreen(){return !S.w&&(S.tab==='orders'||(S.tab==='done'&&S.last?.status==='sent'))}
 function scheduleStatuses(){
@@ -358,6 +388,7 @@ function mergeOrders(remote){
  const local=S.orders.filter(o=>o.status!=='sent'&&!requestIds.has(o.submitId)&&(!o.ownerId||o.ownerId===String(user.id)));
  S.orders=[...incoming,...local];
  if(S.last?.serverId){const found=incoming.find(o=>o.serverId===S.last.serverId);if(found)S.last=found}
+ if(pendingOrderId){const found=incoming.find(o=>o.serverId===pendingOrderId);if(found){S.last=found;S.tab='done'}pendingOrderId=null}
  save();
 }
 async function syncOrders(){
@@ -369,7 +400,7 @@ async function syncOrders(){
    const data=await response.json();if(!response.ok||!data.ok||!Array.isArray(data.orders))throw new Error(response.status===401?'Откройте приложение заново':'Нет связи');
    mergeOrders(data.orders);statusError='';
   }catch(e){statusError=e.message==='Откройте приложение заново'?e.message:'Не удалось обновить статусы'}
-  finally{statusLoading=false;lastStatusFetch=Date.now();if(statusScreen()&&!S.sheet)render(true)}
+  finally{statusLoading=false;lastStatusFetch=Date.now();if(statusScreen()&&!S.sheet&&!S.discussing)render(true)}
  })();
  try{await statusSync}finally{statusSync=null;scheduleStatuses()}
 }
@@ -444,7 +475,7 @@ async function requestPhone(){
  finally{S.contactBusy=false;if(S.w)render(true)}
 }
 function missingAddress(){if(!S.w||S.step!==1)return '';if(S.w.addr.trim().length<5)return sv(S.w.sv).mv?'Укажите адрес погрузки':'Укажите адрес';if(sv(S.w.sv).mv&&S.w.to.trim().length<5)return 'Укажите адрес выгрузки';return ''}
-function refresh(){if(S.w){const missing=missingAddress(),needsPhone=S.step===2&&!validPhone(S.w.phone);$('#go').disabled=S.sending||S.preparing||S.contactBusy||!!missing||needsPhone;$('#go').textContent=S.sending?'Отправляем…':S.preparing?'Подготавливаем фото…':S.contactBusy?'Ожидаем номер…':missing|| (needsPhone?'Укажите номер':S.step===2?'Получить расчёт':S.step===0?'Далее: адрес':'Далее: контакт')}}
+function refresh(){if(S.w){const missing=missingAddress(),needsPhone=S.step===2&&!validPhone(S.w.phone);$('#go').disabled=S.sending||S.preparing||S.contactBusy||!!missing||needsPhone;$('#go').textContent=S.sending?'Отправляем…':S.preparing?'Подготавливаем фото…':S.contactBusy?'Ожидаем номер…':missing|| (needsPhone?'Укажите номер':S.step===2?'Получить оценку':S.step===0?'Далее: адрес':'Далее: контакт')}}
 function storeDraft(status='draft'){
  const w=S.w;if(!w)return null;
  const id=w.id||String(Date.now()),photos=w.photos||[];w.photoCount=photos.length;
@@ -474,7 +505,7 @@ async function submitOrder(){
 }
 $('#go').onclick=()=>{
  if(S.sending||S.preparing||S.contactBusy)return;
- if(!S.w){if(S.tab==='done'){S.tab='orders';render()}return}
+ if(!S.w){if(S.tab==='done'&&S.last?.businessStatus==='quoted')return decideQuote(S.discussing?'discuss':'accept');if(S.tab==='done'){S.tab='orders';render()}return}
  S.errors=validate();if(Object.keys(S.errors).length){render();const first=Object.keys(S.errors)[0];$('#'+first)?.focus();return}
  hap();if(S.step<2){storeDraft();S.step++;S.anim='af';return render()}return submitOrder();
 };
@@ -525,15 +556,17 @@ async function addPhotos(files){
   }
  }finally{S.preparing=false;if(S.w===w){storeDraft();render();$('#view').scrollTop=y}}
 }
-function render(preserve=false){edgeBack.cancel();const oldScroll=$('#view').scrollTop;const wiz=!!S.w,v=$('#view');const active=document.activeElement;if(active&&v.contains(active)&&active.matches('input,textarea,select'))active.blur();v.className=S.anim;S.anim='';v.innerHTML=wiz?wizard():({home,orders,done}[S.tab]||home)();v.scrollTop=preserve?oldScroll:0;if(!preserve)v.focus({preventScroll:true});$('#dock').hidden=!wiz&&S.tab!=='done';$('#tabs').hidden=wiz||S.tab==='done';if(!wiz&&S.tab==='done')$('#go').textContent='Мои заявки';document.querySelectorAll('#tabs button').forEach(b=>b.setAttribute('aria-current',b.dataset.v===S.tab));if(inTg)(wiz||S.tab==='done')?tg.BackButton.show():tg.BackButton.hide();if(wiz)refresh();$('#view').inert=S.sending;scheduleStatuses()}
+function render(preserve=false){edgeBack.cancel();const oldScroll=$('#view').scrollTop;const wiz=!!S.w,v=$('#view');const active=document.activeElement;if(active&&v.contains(active)&&active.matches('input,textarea,select'))active.blur();v.className=S.anim;S.anim='';v.innerHTML=wiz?wizard():({home,orders,done}[S.tab]||home)();v.scrollTop=preserve?oldScroll:0;if(!preserve)v.focus({preventScroll:true});$('#dock').hidden=!wiz&&S.tab!=='done';$('#tabs').hidden=wiz||S.tab==='done';if(!wiz&&S.tab==='done'){$('#go').disabled=S.sending;$('#go').textContent=S.sending?'Отправляем…':S.last?.businessStatus==='quoted'?(S.discussing?'Отправить вопрос':'Подходит, согласовать'):'Мои заявки';}document.querySelectorAll('#tabs button').forEach(b=>b.setAttribute('aria-current',b.dataset.v===S.tab));if(inTg)(wiz||S.tab==='done')?tg.BackButton.show():tg.BackButton.hide();if(wiz)refresh();$('#view').inert=S.sending;scheduleStatuses()}
 const keep=fn=>{const y=$('#view').scrollTop;fn();render();$('#view').scrollTop=y};
 document.addEventListener('click',e=>{const b=e.target.closest('[data-a]');if(!b)return;const a=b.dataset.a,v=b.dataset.v,k=b.dataset.k,w=S.w;if(S.sending||S.preparing)return;hap();
+ if(a==='discuss-quote'){S.discussing=true;S.discussionText='';S.discussionVersion=S.last.statusVersion;S.decisionError='';return render(true)}
+ if(a==='cancel-discussion'){S.discussing=false;return render(true)}
  if(a==='share-phone')return requestPhone();
  if(a==='manual-phone'){S.phoneManual=true;S.contactError='';return render(true)}
  if(a==='refresh-orders'){lastStatusFetch=0;return syncOrders()}
  if(a==='tab'){if(v==='orders')lastStatusFetch=0;S.tab=v;S.anim='af';return render()}
  if(a==='start'){S.phoneManual=false;S.contactError='';S.submitError='';S.photoError='';S.w=newW(v);S.step=0;S.errors={};S.anim='af';return render()}
- if(a==='again'||a==='open-request'){const o=S.orders.find(x=>x.id===v);if(!o)return;if(a==='open-request'&&o.status!=='draft'){S.last=o;S.tab='done';return render()}const cached=a==='again'?[]:photoCache.get(o.id)||[];S.photoError=a!=='again'&&o.photoCount&&!cached.length?'Фото из черновика нужно добавить заново.':'';S.submitError='';S.phoneManual=false;S.contactError='';S.w={...newW(o.sv),...o,...(a==='again'?{id:null,serverId:null,submitId:null,businessStatus:null,history:[],statusUpdatedAt:null,date:'',slot:0}: {}),photos:cached};S.step=a==='again'?0:Math.min(o.step||0,2);S.errors={};return render()}
+ if(a==='again'||a==='open-request'){const o=S.orders.find(x=>x.id===v);if(!o)return;if(a==='open-request'&&o.status!=='draft'){S.discussing=false;S.decisionError='';S.last=o;S.tab='done';return render()}const cached=a==='again'?[]:photoCache.get(o.id)||[];S.photoError=a!=='again'&&o.photoCount&&!cached.length?'Фото из черновика нужно добавить заново.':'';S.submitError='';S.phoneManual=false;S.contactError='';S.w={...newW(o.sv),...o,...(a==='again'?{id:null,serverId:null,submitId:null,businessStatus:null,history:[],statusUpdatedAt:null,date:'',slot:0}: {}),photos:cached};S.step=a==='again'?0:Math.min(o.step||0,2);S.errors={};return render()}
  if(a==='back')return back();
  if(a==='exit'){if(w.desc.trim()||w.addr.trim()||w.phone.trim())storeDraft();S.w=null;S.errors={};S.tab='home';S.anim='ab';return render()}
  if(a==='edit'){S.step=+v;S.errors={};return render()}
@@ -604,7 +637,7 @@ const edgeBack=(()=>{
   timer=setTimeout(()=>{cancel();if(commit)back(false)},duration);
  }
  app.addEventListener('touchstart',e=>{
-  if(drag||S.sending||S.preparing||S.sheet||(!S.w&&S.tab!=='done')||e.touches.length!==1)return;
+  if(drag||S.sending||S.preparing||S.discussing||S.sheet||(!S.w&&S.tab!=='done')||e.touches.length!==1)return;
   const t=e.touches[0],bounds=app.getBoundingClientRect();
   if(t.clientX<bounds.left||t.clientX>bounds.left+28||t.clientY<bounds.top||t.clientY>bounds.bottom)return;
   if(e.target.closest('input,textarea,select,.days'))return;
@@ -644,7 +677,7 @@ $('#photo-input').addEventListener('change',e=>{
 });
 document.addEventListener('click',e=>{if(e.target.closest('.photo-add')&&(S.preparing||S.sending))e.preventDefault()},true);
 document.addEventListener('keydown',e=>{if((e.key==='Enter'||e.key===' ')&&e.target.matches('.photo-add')&&!S.preparing&&!S.sending){e.preventDefault();$('#photo-input').click()}});
-document.addEventListener('input',e=>{const f=e.target.dataset.f;if(f&&S.w){S.w[f]=e.target.value;if(S.errors[f]){delete S.errors[f];$('#err-'+f).textContent='';e.target.setAttribute('aria-invalid','false');e.target.closest('.fld')?.classList.remove('invalid')}refresh()}});
+document.addEventListener('input',e=>{if(e.target.hasAttribute('data-quote-note')){S.discussionText=e.target.value;return}const f=e.target.dataset.f;if(f&&S.w){S.w[f]=e.target.value;if(S.errors[f]){delete S.errors[f];$('#err-'+f).textContent='';e.target.setAttribute('aria-invalid','false');e.target.closest('.fld')?.classList.remove('invalid')}refresh()}});
 document.addEventListener('keydown',e=>{if(!S.sheet)return;if(e.key==='Escape')return close();if(e.key==='Tab'){const items=[...document.querySelectorAll('#sheet button:not(:disabled), #sheet a')];const first=items[0],last=items[items.length-1];if(e.shiftKey&&document.activeElement===first){e.preventDefault();last.focus()}else if(!e.shiftKey&&document.activeElement===last){e.preventDefault();first.focus()}}});
 document.addEventListener('visibilitychange',()=>{if(!document.hidden)lastStatusFetch=0;scheduleStatuses()});
 if(inTg)tg.onEvent('activated',()=>{lastStatusFetch=0;scheduleStatuses()});

@@ -1,3 +1,4 @@
+import {parseQuote} from '../src/statuses.mjs';
 import {test,afterEach} from 'node:test';
 import assert from 'node:assert/strict';
 import {DatabaseSync} from 'node:sqlite';
@@ -26,7 +27,8 @@ function env(){
   sqlite.exec(readFileSync(new URL('../migrations/0001_orders.sql',import.meta.url),'utf8'));
   sqlite.exec(readFileSync(new URL('../migrations/0002_statuses.sql',import.meta.url),'utf8'));
   sqlite.exec(readFileSync(new URL('../migrations/0003_contacts.sql',import.meta.url),'utf8'));
-  return {BOT_TOKEN:TOKEN,TELEGRAM_CHAT_ID:'-100123456789',ALLOWED_ORIGIN:ORIGIN,DB:{
+  sqlite.exec(readFileSync(new URL('../migrations/0004_quotes.sql',import.meta.url),'utf8'));
+  return {MINI_APP_URL:'https://websitepreview26.github.io/vashgruz/',BOT_USERNAME:'vash_gruz_test_bot',BOT_TOKEN:TOKEN,TELEGRAM_CHAT_ID:'-100123456789',ALLOWED_ORIGIN:ORIGIN,DB:{
     prepare(sql){return {bind(...args){return {
       sql,args,
       async first(){return sqlite.prepare(sql).get(...args)||null},
@@ -46,7 +48,7 @@ function telegramMock(handler){
   globalThis.fetch=async(url,opts)=>{
     const method=url.split('/').at(-1);calls.push({method,form:opts.body});
     if(handler){const r=await handler(method,calls);if(r)return r}
-    const result=method==='sendMessage'?{message_id:100}:method==='sendPhoto'?{message_id:101,photo:[{file_id:'stored-photo'}]}:[{message_id:101,photo:[{file_id:'stored-1'}]},{message_id:102,photo:[{file_id:'stored-2'}]}];
+    const result=method==='sendMessage'?{message_id:99+calls.filter(c=>c.method==='sendMessage').length}:method==='sendPhoto'?{message_id:101,photo:[{file_id:'stored-photo'}]}:[{message_id:101,photo:[{file_id:'stored-1'}]},{message_id:102,photo:[{file_id:'stored-2'}]}];
     return Response.json({ok:true,result});
   };return calls;
 }
@@ -155,13 +157,11 @@ test('list returns only the authenticated customer orders',async()=>{
  assert.equal((await (await worker.fetch(await listRequest(other),e)).json()).orders.length,0);
  assert.equal((await worker.fetch(await listRequest('invalid'),e)).status,401);
 });
-test('manager moves through the real lifecycle; customer sees updates',async()=>{
+test('manager can assess but cannot accept for customer or mark work completed',async()=>{
  const e={...env(),TELEGRAM_WEBHOOK_SECRET:WEBHOOK_SECRET};managerMock();const {id}=await (await worker.fetch(await request(),e)).json();
- for(const [version,action] of ['processing','confirmed','completed'].entries()){
-  const response=await worker.fetch(callbackRequest(id,version,action),e);assert.equal(response.status,200);
-  assert.equal(e.sqlite.prepare('SELECT business_status FROM orders').get().business_status,action);
- }
- const list=await (await worker.fetch(await listRequest(),e)).json();assert.equal(list.orders[0].businessStatus,'completed');assert.equal(list.orders[0].history.length,4);
+ await worker.fetch(callbackRequest(id,0,'processing'),e);
+ await worker.fetch(callbackRequest(id,1,'confirmed'),e);await worker.fetch(callbackRequest(id,1,'completed'),e);
+ assert.equal(e.sqlite.prepare('SELECT business_status FROM orders').get().business_status,'processing');
 });
 test('forged webhook, foreign chat, ordinary members and wrong message cannot change status',async()=>{
  const e={...env(),TELEGRAM_WEBHOOK_SECRET:WEBHOOK_SECRET};managerMock('member');const {id}=await (await worker.fetch(await request(),e)).json();
@@ -182,7 +182,7 @@ test('stale and duplicate callbacks do not reverse or repeat transitions',async(
 test('cancellation asks for confirmation and terminal state cannot be reopened',async()=>{
  const e={...env(),TELEGRAM_WEBHOOK_SECRET:WEBHOOK_SECRET},calls=managerMock();const {id}=await (await worker.fetch(await request(),e)).json();
  await worker.fetch(callbackRequest(id,0,'ask_cancel'),e);assert.equal(e.sqlite.prepare('SELECT business_status FROM orders').get().business_status,'received');
- const cancelButtons=calls.filter(c=>c.method==='editMessageReplyMarkup').at(-1).form.get('reply_markup');assert.match(cancelButtons,/Да, отменить заказ/);
+ const cancelButtons=calls.filter(c=>c.method==='editMessageReplyMarkup').at(-1).form.get('reply_markup');assert.match(cancelButtons,/Да, закрыть заявку/);
  await worker.fetch(callbackRequest(id,0,'cancelled'),e);await worker.fetch(callbackRequest(id,1,'processing'),e);
  assert.equal(e.sqlite.prepare('SELECT business_status FROM orders').get().business_status,'cancelled');
 });
@@ -209,4 +209,59 @@ test('Telegram contact is accepted only from its owner in private chat',async()=
  assert.equal((await (await worker.fetch(own,e)).json()).phone,'+375291234567');
  const other=new Request('https://api.example/api/contact',{method:'POST',headers:{origin:ORIGIN},body:JSON.stringify({initData:await auth({user:JSON.stringify({id:99})})})});
  assert.equal((await (await worker.fetch(other,e)).json()).phone,'');
+});
+
+function priceMessage(promptId,text,messageId=500,actor=77){return new Request('https://api.example/telegram/webhook',{method:'POST',headers:{'X-Telegram-Bot-Api-Secret-Token':WEBHOOK_SECRET},body:JSON.stringify({message:{message_id:messageId,chat:{id:-100123456789,type:'supergroup'},from:{id:actor},text,reply_to_message:{message_id:promptId}}})})}
+async function quoteFixture(){
+ const e={...env(),TELEGRAM_WEBHOOK_SECRET:WEBHOOK_SECRET},calls=managerMock();const {id}=await (await worker.fetch(await request(),e)).json();
+ await worker.fetch(callbackRequest(id,0,'processing'),e);await worker.fetch(callbackRequest(id,1,'price'),e);
+ const prompt=e.sqlite.prepare('SELECT message_id FROM quote_prompts').get();assert(prompt);
+ await worker.fetch(priceMessage(prompt.message_id,'150,50\nВынос и машина включены'),e);
+ return {e,calls,id,promptId:prompt.message_id};
+}
+async function decisionRequest(id,version,action,{init,actionId=crypto.randomUUID(),note=''}={}){return new Request('https://api.example/api/orders/decision',{method:'POST',headers:{origin:ORIGIN,'content-type':'application/json'},body:JSON.stringify({initData:init||await auth(),id,version,action,actionId,note})})}
+
+test('quote parser uses integer kopecks and requires clear nonzero price',()=>{
+ assert.deepEqual(parseQuote('150,50 BYN\nВсё включено'),{amount:15050,note:'Всё включено'});
+ assert.deepEqual(parseQuote('100.5'),{amount:10050,note:''});
+ for(const text of ['0','-150','150-200','100.555','150\n'+'x'.repeat(601)])assert.equal(parseQuote(text),null);
+});
+test('manager publishes a real quote with conditions and notifies the customer',async()=>{
+ const {e,calls,promptId}=await quoteFixture();const row=e.sqlite.prepare('SELECT * FROM orders').get();
+ assert.equal(row.business_status,'quoted');assert.equal(row.quote_amount_minor,15050);assert.equal(row.quote_revision,1);
+ const result=await (await worker.fetch(await listRequest(),e)).json();assert.equal(result.orders[0].quote.amountMinor,15050);assert.equal(result.orders[0].quote.note,'Вынос и машина включены');
+ assert(calls.some(c=>c.method==='sendMessage'&&c.form.get('chat_id')==='42'&&c.form.get('reply_markup').includes('web_app')&&c.form.get('reply_markup').includes('?order=')));
+ const count=e.sqlite.prepare('SELECT COUNT(*) n FROM order_status_events').get().n;
+ await worker.fetch(priceMessage(promptId,'150,50\nВынос и машина включены'),e);assert.equal(e.sqlite.prepare('SELECT COUNT(*) n FROM order_status_events').get().n,count);
+});
+test('only customer can accept a quote; repeated decision does not duplicate notification',async()=>{
+ const {e,calls,id}=await quoteFixture();const actionId=crypto.randomUUID();
+ const other=await auth({user:JSON.stringify({id:99})});assert.equal((await worker.fetch(await decisionRequest(id,2,'accept',{init:other}),e)).status,404);
+ const accepted=await worker.fetch(await decisionRequest(id,2,'accept',{actionId}),e);assert.equal(accepted.status,200);assert.equal((await accepted.json()).order.businessStatus,'accepted');
+ const n=calls.length;assert.equal((await worker.fetch(await decisionRequest(id,2,'accept',{actionId}),e)).status,200);assert.equal(calls.length,n);
+ assert.equal((await worker.fetch(await decisionRequest(id,2,'discuss',{actionId}),e)).status,409);
+});
+test('discussion keeps the lead, and manager can publish a revised quote',async()=>{
+ const {e,id}=await quoteFixture();
+ const discussion=await worker.fetch(await decisionRequest(id,2,'discuss',{note:'Помогу с погрузкой, можно дешевле?'}),e);assert.equal((await discussion.json()).order.businessStatus,'discussion');
+ assert.equal(e.sqlite.prepare('SELECT customer_note FROM orders').get().customer_note,'Помогу с погрузкой, можно дешевле?');
+ await worker.fetch(callbackRequest(id,3,'price'),e);const prompt=e.sqlite.prepare('SELECT * FROM quote_prompts ORDER BY message_id DESC LIMIT 1').get();
+ await worker.fetch(priceMessage(prompt.message_id,'120\nС вашей помощью при погрузке',501),e);
+ const row=e.sqlite.prepare('SELECT * FROM orders').get();assert.equal(row.business_status,'quoted');assert.equal(row.quote_amount_minor,12000);assert.equal(row.quote_revision,2);
+ assert.equal((await worker.fetch(await decisionRequest(id,2,'accept'),e)).status,409);
+ assert.equal((await worker.fetch(await decisionRequest(id,4,'accept'),e)).status,200);
+});
+test('simultaneous new price and acceptance never accepts a price customer did not see',async()=>{
+ const {e,id}=await quoteFixture();await worker.fetch(callbackRequest(id,2,'price'),e);const prompt=e.sqlite.prepare('SELECT * FROM quote_prompts ORDER BY message_id DESC LIMIT 1').get();
+ await Promise.all([worker.fetch(priceMessage(prompt.message_id,'300',502),e),worker.fetch(await decisionRequest(id,2,'accept'),e)]);
+ const row=e.sqlite.prepare('SELECT * FROM orders').get();
+ assert(row.business_status==='quoted'||row.business_status==='accepted');if(row.business_status==='accepted')assert.equal(row.quote_amount_minor,15050);
+});
+
+test('backfill treats already identical Telegram message as success',async()=>{
+ const e={...env(),TELEGRAM_WEBHOOK_SECRET:WEBHOOK_SECRET,ADMIN_SETUP_SECRET:WEBHOOK_SECRET};managerMock();await worker.fetch(await request(),e);
+ e.sqlite.exec('UPDATE orders SET buttons_version=0');
+ telegramMock(method=>method.startsWith('editMessage')?Response.json({ok:false,error_code:400,description:'Bad Request: message is not modified'},{status:400}):undefined);
+ const r=await worker.fetch(new Request('https://api.example/internal/telegram/setup',{method:'POST',headers:{authorization:'Bearer '+WEBHOOK_SECRET},body:JSON.stringify({action:'backfill'})}),e);
+ const result=await r.json();assert.equal(result.changed,1);assert.equal(result.failed,0);assert.equal(result.remaining,0);
 });
