@@ -41,12 +41,16 @@ export function validateOrder(raw){
   const w={sv:raw.sv,desc:text('desc',1000),addr:text('addr',220,true),to:text('to',220,raw.sv==='flat'||raw.sv==='office'),name:raw.name===undefined?'':text('name',60),phone:text('phone',25)};
   if(!/^\+?[1-9]\d{8,14}$/.test(w.phone.replace(/[\s()-]/g,'')))fail(400,'ORDER','Проверьте номер телефона.');
   for(const k of ['floor','toFloor']){
-    if(!Number.isInteger(raw[k])||raw[k]<1||raw[k]>50)fail(400,'ORDER','Проверьте этаж.');
+    if(raw[k]!==null&&(!Number.isInteger(raw[k])||raw[k]<1||raw[k]>50))fail(400,'ORDER','Проверьте этаж.');
     w[k]=raw[k];
   }
   for(const k of ['lift','toLift','dis']){
-    if(typeof raw[k]!=='boolean')fail(400,'ORDER','Проверьте условия заказа.');w[k]=raw[k];
+    if(typeof raw[k]!=='boolean'&&!(k!=='dis'&&raw[k]===null))fail(400,'ORDER','Проверьте условия заказа.');w[k]=raw[k];
   }
+  const location=raw.location??null;
+  if(location!==null&&(!['furniture','construction','trash'].includes(w.sv)||!['indoor','outside'].includes(location)))fail(400,'ORDER','Проверьте место погрузки.');
+  if(location!==null)w.location=location;
+  if(location==='outside'){w.floor=null;w.lift=null}
   if(!Number.isInteger(raw.slot)||raw.slot<0||raw.slot>3)fail(400,'ORDER','Проверьте время.');w.slot=raw.slot;
   const date=text('date',10),today=new Date().toLocaleDateString('en-CA',{timeZone:'Europe/Minsk'});
   if(date&&(!/^\d{4}-\d{2}-\d{2}$/.test(date)||Number.isNaN(Date.parse(date+'T12:00:00Z'))||new Date(date+'T12:00:00Z').toISOString().slice(0,10)!==date||date<today))fail(400,'ORDER','Выберите сегодняшнюю или будущую дату.');
@@ -73,10 +77,10 @@ async function boundedForm(request){
   catch{fail(400,'FORMAT','Не удалось прочитать заявку.')}
 }
 export function orderMessage(w,id,user,photoCount){
-  const floor=(f,l)=>`${f} этаж, ${l?'есть лифт':'без лифта'}`;
+  const floor=(f,l)=>(Number.isInteger(f)?f+' этаж':'Этаж не указан')+', '+(l===true?'есть лифт':l===false?'без лифта':'лифт не указан');
   return [
     `Заявка на оценку ${id}`,names[w.sv],w.desc.replace(/\s+/g,' ')||'Без описания',
-    `Адрес: ${w.addr}`,floor(w.floor,w.lift),
+    `Адрес: ${w.addr}`,w.location==='outside'?'Уже на улице':w.location==='indoor'?'Из помещения · '+floor(w.floor,w.lift):floor(w.floor,w.lift),
     ...((w.sv==='flat'||w.sv==='office')?[`Куда: ${w.to}`,floor(w.toFloor,w.toLift)]:[]),
     ...(w.dis?['Нужна разборка']:[]),`Когда: ${w.date||'По согласованию'}${w.date?', '+slots[w.slot]:''}`,
     `Имя: ${w.name||user.first_name||'Не указано'}`,`Телефон: ${w.phone}`,

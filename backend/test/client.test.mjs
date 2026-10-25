@@ -110,7 +110,7 @@ test('Telegram phone sharing fills contact without a name field and caches numbe
  c.context.fetch=async()=>Response.json({ok:true,phone:'+375291234567',updatedAt:Date.now()});
  c.run("S.w=newW('trash');S.step=2;render()");assert.match(c.node('#view').innerHTML,/Подставить номер/);assert(!c.node('#view').innerHTML.includes('id="name"'));
  await c.run('requestPhone()');assert.equal(c.run('S.w.phone'),'+375291234567');assert.equal(c.run('S.contactBusy'),false);assert.equal(c.node('#go').disabled,false);
- assert.match(c.node('#view').innerHTML,/Для связи с водителем/);assert.equal(c.run("newW('flat').phone"),'+375291234567');
+ assert.match(c.node('#view').innerHTML,/Для уточнения деталей/);assert.equal(c.run("newW('flat').phone"),'+375291234567');
 });
 test('declining Telegram contact opens manual option without inventing a number',async()=>{
  const c=client({live:true});c.tg.requestContact=cb=>cb(false);c.run("S.w=newW('trash');S.step=2;render()");
@@ -205,4 +205,18 @@ test('order menu contains deletion and current assessment cancellation without r
  const c=client();c.run("S.orders=[{id:'lead',serverId:'VG-LEAD',status:'sent',sv:'trash',businessStatus:'processing'}];S.orderMenuId='lead';S.sheet='order-actions'");
  let menu=c.run('orderActionsSheet()');assert.match(menu,/Удалить из списка/);assert.match(menu,/Отменить оценку/);assert(!menu.includes('data-a="again"'));assert(!menu.includes('data-v="archive"'));assert(!menu.includes('data-v="restore"'));
  c.run("S.orders[0].businessStatus='cancelled'");menu=c.run('orderActionsSheet()');assert.match(menu,/Удалить из списка/);assert(!menu.includes('Отменить оценку'));
+});
+
+test('pickup location controls conditions without assuming floor or lift and copy describes assessment',()=>{
+ const c=client();c.run("S.w=newW('furniture');S.step=1;render()");
+ assert.equal(c.run('S.w.floor'),null);assert.equal(c.run('S.w.lift'),null);assert.equal(c.run('S.w.location'),null);
+ let html=c.node('#view').innerHTML;assert.match(html,/Из помещения/);assert.match(html,/Уже на улице/);assert(!html.includes('data-k="floor"'));
+ c.run("S.w.location='indoor';render()");html=c.node('#view').innerHTML;assert.match(html,/data-k="floor"/);assert.match(html,/>—<\/b>/);assert.match(html,/data-v="null" aria-pressed="true"/);
+ c.run("S.w.location='outside';S.w.floor=4;S.w.lift=true;render()");assert(!c.node('#view').innerHTML.includes('data-k="floor"'));assert.match(c.run('ticket(S.w)'),/Уже на улице/);assert(!c.run('ticket(S.w)').includes('4 этаж'));
+ c.run("S.step=0;render()");html=c.node('#view').innerHTML;assert.match(html,/Описание/);assert.match(html,/Помогут точнее оценить стоимость/);assert(!html.includes('Коротко:'));
+ c.run("S.step=2;render()");assert.match(c.node('#view').innerHTML,/Куда сообщить стоимость/);assert.match(c.node('#view').innerHTML,/Предложение появится здесь/);
+});
+test('quote question is a secondary action without the price-objection prompt',()=>{
+ const c=client();c.context.proposal={quote:{amountMinor:15000},businessStatus:'quoted'};
+ const html=c.run('quoteCard(proposal)');assert.match(html,/class="quote-question"/);assert.match(html,/Задать вопрос/);assert(!html.includes('Если цена или условия не подходят'));
 });

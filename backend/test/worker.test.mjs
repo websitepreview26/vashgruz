@@ -397,3 +397,15 @@ test('furniture removal is accepted as a distinct service and named in the manag
  assert.equal(response.status,200);assert.match(calls[0].form.get('text'),/Вывоз старой мебели/);
  assert.equal(JSON.parse(e.sqlite.prepare('SELECT payload FROM orders').get().payload).sv,'furniture');
 });
+
+test('unknown floor and lift remain unknown; outside pickup clears hidden conditions in storage and bot message',async()=>{
+ assert.equal(validateOrder({...order(),floor:null,lift:null,toFloor:null,toLift:null}).floor,null);
+ const legacy=validateOrder(order());assert(!Object.hasOwn(legacy,'location'));
+ const e=env(),calls=telegramMock();
+ assert.equal((await worker.fetch(await request({data:{...order(),sv:'furniture',location:'outside',floor:5,lift:true}}),e)).status,200);
+ const payload=JSON.parse(e.sqlite.prepare('SELECT payload FROM orders').get().payload);
+ assert.equal(payload.location,'outside');assert.equal(payload.floor,null);assert.equal(payload.lift,null);
+ assert.match(calls[0].form.get('text'),/Уже на улице/);assert(!calls[0].form.get('text').includes('5 этаж'));
+ assert.throws(()=>validateOrder({...order(),location:'garage'}),{code:'ORDER'});
+ assert.throws(()=>validateOrder({...order(),sv:'flat',to:'Минск, Ленина 2',location:'outside'}),{code:'ORDER'});
+});
