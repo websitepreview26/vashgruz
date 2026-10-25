@@ -108,7 +108,7 @@ test('both moving addresses are visible together; next is disabled until both ar
 test('Telegram phone sharing fills contact without a name field and caches number for next order',async()=>{
  const c=client({live:true});c.tg.requestContact=cb=>cb(true);
  c.context.fetch=async()=>Response.json({ok:true,phone:'+375291234567',updatedAt:Date.now()});
- c.run("S.w=newW('trash');S.step=2;render()");assert.match(c.node('#view').innerHTML,/Поделиться номером/);assert(!c.node('#view').innerHTML.includes('id="name"'));
+ c.run("S.w=newW('trash');S.step=2;render()");assert.match(c.node('#view').innerHTML,/Подставить номер/);assert(!c.node('#view').innerHTML.includes('id="name"'));
  await c.run('requestPhone()');assert.equal(c.run('S.w.phone'),'+375291234567');assert.equal(c.run('S.contactBusy'),false);assert.equal(c.node('#go').disabled,false);
  assert.match(c.node('#view').innerHTML,/Для связи с водителем/);assert.equal(c.run("newW('flat').phone"),'+375291234567');
 });
