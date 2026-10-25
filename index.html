@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, minimum-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
 <title>Ваш Груз</title>
 <script src="https://telegram.org/js/telegram-web-app.js"></script>
+<script src="api-config.js"></script>
 <style>
 :root{--bg:#f3f4f6;--card:#fff;--ink:#0f1b2a;--mut:#6c7a89;--line:rgba(15,27,42,.09);--acc:#ffbf16;--accx:#1a1400;--navy:#0f1b2a;--sh:0 1px 2px rgba(15,27,42,.05),0 10px 28px rgba(15,27,42,.07)}
 [data-t=dark]{--bg:#0a1119;--card:#131d28;--ink:#eef3f8;--mut:#8796a7;--line:rgba(255,255,255,.08);--sh:0 10px 28px rgba(0,0,0,.4)}
@@ -171,6 +172,13 @@ body{background:var(--bg)}.app-toolbar{display:flex;align-items:center;justify-c
 .edge-page input,.edge-page textarea{caret-color:transparent}
 #app.edge-dragging>#view,#app.edge-dragging>#dock,#app.edge-dragging>#tabs{visibility:hidden}
 #view:focus{outline:none}
+
+.photo-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
+.photo-item,.photo-add{aspect-ratio:1;border-radius:15px;position:relative;overflow:hidden;background:var(--card)}
+.photo-item img{width:100%;height:100%;object-fit:cover;display:block}
+.photo-item button{position:absolute;right:5px;top:5px;border-radius:50%;background:#0f1b2acc;color:#fff;width:27px;height:27px;display:grid;place-items:center}
+.photo-item button svg{width:15px;height:15px}.photo-add{border:1px dashed var(--mut);display:flex;align-items:center;justify-content:center;flex-direction:column;gap:8px;color:var(--mut);font-size:12px}
+#go:disabled{opacity:.6}
 </style>
 </head>
 <body>
@@ -251,18 +259,20 @@ const plus = n => { const d = new Date(); d.setDate(d.getDate()+n); return d; };
 const today = () => iso(new Date());
 const fd = (s, long) => !s ? 'По согласованию' : new Date(s+'T12:00').toLocaleDateString('ru-RU', long ? {weekday:'long', day:'numeric', month:'long'} : {day:'numeric', month:'long'});
 const user = tg && tg.initDataUnsafe && tg.initDataUnsafe.user;
-let S = {tab:'home', w:null, step:0, last:null, sheet:null, cal:null, anim:'', orders:[], errors:{}};
+const API_BASE=String(window.VG_CONFIG?.apiBase||'').replace(/\/$/,'');
+const photoCache=new Map();
+let S = {tab:'home', w:null, step:0, last:null, sheet:null, cal:null, anim:'', orders:[], errors:{},sending:false,preparing:false,photoError:'',submitError:''};
 try {
  const current=localStorage.getItem('vg-requests-v2');
  if(current){const o=JSON.parse(current);if(Array.isArray(o))S.orders=o}
  else {const old=JSON.parse(localStorage.getItem('vg-orders')||'[]');if(Array.isArray(old))S.orders=old.map(o=>({...o,status:'draft',step:0,toFloor:1,toLift:true,slot:Math.max(0,SLOTS.findIndex(s=>s[0]===o.slot))}))}
 } catch(e){}
-const newW = id => ({sv:id||'trash',desc:'',addr:'',to:'',floor:1,lift:true,toFloor:1,toLift:true,dis:false,date:'',slot:0,name:user?user.first_name:'',phone:''});
+const newW = id => ({photos:[],sv:id||'trash',desc:'',addr:'',to:'',floor:1,lift:true,toFloor:1,toLift:true,dis:false,date:'',slot:0,name:user?user.first_name:'',phone:''});
 function save(){try{localStorage.setItem('vg-requests-v2',JSON.stringify(S.orders));return true}catch(e){return false}}
 const TABS = [['home','Заказ','truck'],['orders','Заявки','list']];
 $('#tabs').innerHTML = TABS.map(t => `<button data-a="tab" data-v="${t[0]}">${ic(t[2])}${t[1]}</button>`).join('');
 if (inTg) tg.BackButton.onClick(back);
-function back(animated=true){hap();if(S.sheet)return close();S.errors={};S.anim=animated===false?'':'ab';if(S.w&&S.step>0)S.step--;else{if(S.w&&(S.w.desc.trim()||S.w.addr.trim()))storeDraft();const wasDone=S.tab==='done';S.w=null;S.tab=wasDone?'orders':'home'}render()}
+function back(animated=true){if(S.sending||S.preparing)return;hap();if(S.sheet)return close();S.errors={};S.anim=animated===false?'':'ab';if(S.w&&S.step>0)S.step--;else{if(S.w&&(S.w.desc.trim()||S.w.addr.trim()))storeDraft();const wasDone=S.tab==='done';S.w=null;S.tab=wasDone?'orders':'home'}render()}
 function home(){
  const draft=S.orders.find(o=>o.status==='draft');
  return `<div class="hrow"><h1>Что нужно вывезти<br>или перевезти?</h1></div>
@@ -279,7 +289,7 @@ function wizard(){
  if(S.step===0)return bar+`<div class="hd"><h1>${s.q}</h1><p class="sub">Коротко: что и сколько.</p></div>
  <button class="pill" style="--c:${s.c}" data-a="sheet" data-v="svc"><span class="ib sm">${ic(s.id)}</span><b>${s.n}</b><em>Изменить</em></button>
  <label class="field-label" for="desc">Что и примерно сколько? <span style="font-weight:400;color:var(--mut)">· необязательно</span></label><div class="card input-card"><textarea id="desc" class="task-input" data-f="desc" maxlength="1000" aria-describedby="err-desc" aria-invalid="${!!S.errors.desc}" placeholder="${s.ph}">${esc(w.desc)}</textarea></div>${error('desc')}
- <div class="sec"><b>Фото</b><small>необязательно</small></div><div class="photo-stub" aria-label="Добавление фото пока недоступно"><div class="photo-stub-icon">${ic('cam')}${ic('plus')}</div><div><b>Добавить фото</b><small>Скоро</small></div></div>`;
+ <div class="sec"><b>Фото</b><small>необязательно · до 5</small></div><div class="photo-grid">${(w.photos||[]).map((p,i)=>`<div class="photo-item"><img src="${p.url}" alt="Фото ${i+1}"><button data-a="remove-photo" data-v="${i}" aria-label="Удалить фото ${i+1}">${ic('x')}</button></div>`).join('')}${(w.photos||[]).length<5?`<button class="photo-add" data-a="add-photo" ${S.preparing?'disabled':''}>${ic('cam')}<span>${S.preparing?'Подготовка…':'Добавить'}</span></button>`:''}</div><input id="photo-input" type="file" accept="image/*" multiple hidden><p class="error" id="photo-error" role="alert">${esc(S.photoError)}</p>`;
  if(S.step===1)return bar+`<div class="hd"><h1>${s.mv?'Откуда и куда?':'Куда приехать?'}</h1><p class="sub">Адрес и удобное время.</p></div>
  ${addressField('addr',s.mv?'Адрес погрузки':'Адрес','Улица, дом, населённый пункт')}${conditions('',s.mv?'На погрузке':'Условия на месте')}
  ${s.mv?addressField('to','Адрес выгрузки','Улица, дом, населённый пункт')+conditions('to','На выгрузке'):''}
@@ -292,11 +302,11 @@ function wizard(){
  <label class="field-label" for="phone">Телефон</label><div class="fld ${S.errors.phone?'invalid':''}">${ic('phone')}<input id="phone" data-f="phone" type="tel" inputmode="tel" autocomplete="tel" maxlength="25" aria-describedby="err-phone" aria-invalid="${!!S.errors.phone}" placeholder="+375 __ ___-__-__" value="${esc(w.phone)}"></div>${error('phone')}
  <label class="field-label" for="name">Имя <span style="font-weight:400;color:var(--mut)">· необязательно</span></label><div class="fld">${ic('user')}<input id="name" data-f="name" autocomplete="given-name" maxlength="60" placeholder="Как к вам обращаться" value="${esc(w.name)}"></div>
  <div class="sec"><b>Ваша задача</b><button class="review-edit" data-a="edit" data-v="0">Изменить</button></div>${ticket(w)}
- <p class="fine">Демо-режим: заявка сохранится в приложении.</p>`;
+ <p class="error" role="alert">${esc(S.submitError)}</p>${API_BASE?'':'<p class="fine">Демо-режим: отправка ещё не подключена.</p>'}`;
 }
-function ticket(w){const s=sv(w.sv);const rows=[['Услуга',s.n],['Задача',w.desc||'Без описания'],['Адрес',w.addr],['Условия',`${w.floor} этаж, ${w.lift?'есть лифт':'без лифта'}`],...(s.mv?[['Куда',w.to],['На выгрузке',`${w.toFloor} этаж, ${w.toLift?'есть лифт':'без лифта'}`]]:[]),...(w.dis?[['Разборка','Нужна']]:[]),['Когда',fd(w.date)+(w.date&&w.slot?', '+SLOTS[w.slot][0].toLowerCase():'')]];return `<div class="ticket">${rows.map(([a,b])=>`<div class="r"><span>${a}</span><b>${esc(b)}</b></div>`).join('')}<div class="r tot"><span>Стоимость</span><b style="font-size:16px">После оценки</b></div></div>`}
-function orders(){return `<div class="app-receipt-head"><h1>Заявки</h1><button data-a="tab" data-v="home">+ Новая</button></div>`+(S.orders.length?S.orders.map(o=>`<div class="ord"><div class="h"><span class="ib" style="--c:${sv(o.sv).c}">${ic(o.sv)}</span><div><b>${sv(o.sv).n}</b><br><small>№ ${esc(o.id)} · ${esc(fd(o.date))}</small></div></div><span class="status">${o.status==='demo'?'Демо-заявка':o.status==='prepared'?'Подготовлена':'Черновик'}</span><p class="sub" style="font-size:14px">${esc(o.desc)}</p><div class="order-foot"><button class="btn2" data-a="open-request" data-v="${esc(o.id)}">${o.status!=='draft'?'Открыть':'Продолжить'}</button><button class="review-edit" data-a="again" data-v="${esc(o.id)}">Повторить</button></div></div>`).join(''):`<div class="empty"><div class="ib">${ic('list')}</div><b style="color:var(--ink);font-size:18px">Заявок пока нет</b><p style="margin:6px 0 18px">Расскажите, с чем нужна помощь</p><button class="btn2" style="background:var(--acc);color:var(--accx)" data-a="tab" data-v="home">Выбрать услугу</button></div>`)}
-function done(){const o=S.last;return `<div class="done"><div class="ring">${ic('check')}</div><h1>Заявка создана</h1><p class="sub">№ ${esc(o.id.slice(-6))}</p></div><div class="app-status"><i></i>Демо · сохранена на устройстве</div>${ticket(o)}<p class="fine">Отправка на расчёт пока не подключена.</p><button class="btn2" data-a="edit-last">Изменить заявку</button>`}
+function ticket(w){const s=sv(w.sv);const rows=[['Услуга',s.n],['Задача',w.desc||'Без описания'],...((w.photos?.length||w.photoCount)?[['Фото',String(w.photos?.length||w.photoCount)+' шт.']]:[]),['Адрес',w.addr],['Условия',`${w.floor} этаж, ${w.lift?'есть лифт':'без лифта'}`],...(s.mv?[['Куда',w.to],['На выгрузке',`${w.toFloor} этаж, ${w.toLift?'есть лифт':'без лифта'}`]]:[]),...(w.dis?[['Разборка','Нужна']]:[]),['Когда',fd(w.date)+(w.date&&w.slot?', '+SLOTS[w.slot][0].toLowerCase():'')]];return `<div class="ticket">${rows.map(([a,b])=>`<div class="r"><span>${a}</span><b>${esc(b)}</b></div>`).join('')}<div class="r tot"><span>Стоимость</span><b style="font-size:16px">После оценки</b></div></div>`}
+function orders(){return `<div class="app-receipt-head"><h1>Заявки</h1><button data-a="tab" data-v="home">+ Новая</button></div>`+(S.orders.length?S.orders.map(o=>`<div class="ord"><div class="h"><span class="ib" style="--c:${sv(o.sv).c}">${ic(o.sv)}</span><div><b>${sv(o.sv).n}</b><br><small>№ ${esc(o.serverId||o.id)} · ${esc(fd(o.date))}</small></div></div><span class="status">${o.status==='sent'?'Отправлена':o.status==='demo'?'Демо-заявка':o.status==='prepared'?'Подготовлена':'Черновик'}</span><p class="sub" style="font-size:14px">${esc(o.desc)}</p><div class="order-foot"><button class="btn2" data-a="open-request" data-v="${esc(o.id)}">${o.status!=='draft'?'Открыть':'Продолжить'}</button><button class="review-edit" data-a="again" data-v="${esc(o.id)}">Повторить</button></div></div>`).join(''):`<div class="empty"><div class="ib">${ic('list')}</div><b style="color:var(--ink);font-size:18px">Заявок пока нет</b><p style="margin:6px 0 18px">Расскажите, с чем нужна помощь</p><button class="btn2" style="background:var(--acc);color:var(--accx)" data-a="tab" data-v="home">Выбрать услугу</button></div>`)}
+function done(){const o=S.last,sent=o.status==='sent';return `<div class="done"><div class="ring">${ic('check')}</div><h1>${sent?'Заявка отправлена':'Заявка создана'}</h1><p class="sub">№ ${esc(o.serverId||o.id.slice(-6))}</p></div><div class="app-status"><i></i>${sent?'Получена для расчёта':'Демо · сохранена на устройстве'}</div>${ticket(o)}<p class="fine">${sent?'Менеджер получил данные'+(o.photoCount?' и фотографии':'')+'. Стоимость и время согласуем отдельно.':'Отправка на расчёт пока не подключена.'}</p>${sent?'':'<button class="btn2" data-a="edit-last">Изменить заявку</button>'}`}
 function sheetHTML(){
  if(S.sheet==='svc')return `<div class="grab"></div><h3>Услуга</h3>${SV.map(s=>`<button class="opt" style="--c:${s.c}" data-a="pick" data-v="${s.id}" aria-pressed="${S.w.sv===s.id}"><span class="ib sm">${ic(s.id)}</span><div><b>${s.n}</b><small>${s.d}</small></div>${S.w.sv===s.id?ic('check'):''}</button>`).join('')}`;
  const {y,m}=S.cal,w=S.w,first=new Date(y,m,1),off=(first.getDay()+6)%7,n=new Date(y,m+1,0).getDate(),now=new Date();
@@ -334,19 +344,81 @@ function close(){
  sheetFocus=null;
 }
 function validate(){const w=S.w,e={};if(S.step===1){if(w.addr.trim().length<5)e.addr='Укажите улицу, дом и населённый пункт.';if(sv(w.sv).mv&&w.to.trim().length<5)e.to='Укажите адрес выгрузки.';if(w.date&&w.date<today())e.date='Выберите сегодняшнюю или будущую дату.'}if(S.step===2){const digits=w.phone.replace(/\D/g,'');if(!/^(?:375\d{9}|80\d{9})$/.test(digits))e.phone='Введите номер: +375 и 9 цифр, либо 8 0 и 9 цифр.'}return e}
-function refresh(){if(S.w)$('#go').textContent=S.step===2?'Получить расчёт':S.step===0?'Далее: адрес':'Далее: контакт'}
-function storeDraft(status='draft'){const w=S.w;if(!w)return null;const o={...w,id:w.id||String(Date.now()),status,step:S.step,updatedAt:new Date().toISOString()};const i=S.orders.findIndex(x=>x.id===o.id);if(i<0)S.orders.unshift(o);else S.orders[i]=o;S.w.id=o.id;save();return o}
-$('#go').onclick=()=>{if(!S.w){if(S.tab==='done'){S.tab='orders';render()}return;}S.errors=validate();if(Object.keys(S.errors).length){render();const first=Object.keys(S.errors)[0];$('#'+first)?.focus();return}hap();if(S.step<2){storeDraft();S.step++;S.anim='af';return render()}const o=storeDraft('demo');S.last=o;S.w=null;S.tab='done';S.anim='af';render()};
-function render(){edgeBack.cancel();const wiz=!!S.w,v=$('#view');const active=document.activeElement;if(active&&v.contains(active)&&active.matches('input,textarea,select'))active.blur();v.className=S.anim;S.anim='';v.innerHTML=wiz?wizard():({home,orders,done}[S.tab]||home)();v.scrollTop=0;v.focus({preventScroll:true});$('#dock').hidden=!wiz&&S.tab!=='done';$('#tabs').hidden=wiz||S.tab==='done';if(!wiz&&S.tab==='done')$('#go').textContent='Мои заявки';document.querySelectorAll('#tabs button').forEach(b=>b.setAttribute('aria-current',b.dataset.v===S.tab));if(inTg)(wiz||S.tab==='done')?tg.BackButton.show():tg.BackButton.hide();if(wiz)refresh()}
+function refresh(){if(S.w){$('#go').disabled=S.sending||S.preparing;$('#go').textContent=S.sending?'Отправляем…':S.preparing?'Подготавливаем фото…':S.step===2?'Получить расчёт':S.step===0?'Далее: адрес':'Далее: контакт'}}
+function storeDraft(status='draft'){
+ const w=S.w;if(!w)return null;
+ const id=w.id||String(Date.now()),photos=w.photos||[];w.photoCount=photos.length;
+ const o={...w,photos:[],photoCount:photos.length,id,status,step:S.step,updatedAt:new Date().toISOString()};
+ photoCache.set(id,photos);
+ const i=S.orders.findIndex(x=>x.id===id);if(i<0)S.orders.unshift(o);else S.orders[i]=o;
+ S.w.id=id;save();return o;
+}
+async function submitOrder(){
+ const w=S.w;if(!w||S.sending||S.preparing)return;
+ if(!API_BASE){const o=storeDraft('demo');S.last=o;S.w=null;S.tab='done';S.anim='af';return render()}
+ if(!inTg||!tg.initData){S.submitError='Для отправки откройте мини-приложение через бота в Telegram.';return render()}
+ w.submitId=w.submitId||crypto.randomUUID();storeDraft();
+ S.sending=true;S.submitError='';render();
+ try{
+  const form=new FormData();form.set('requestId',w.submitId);form.set('initData',tg.initData);
+  const payload={};for(const key of ['sv','desc','addr','to','floor','toFloor','lift','toLift','dis','date','slot','name','phone'])payload[key]=w[key];
+  form.set('order',JSON.stringify(payload));
+  for(const [i,p] of (w.photos||[]).entries())form.append('photos',p.blob,`photo-${i+1}.jpg`);
+  const response=await fetch(API_BASE+'/api/orders',{method:'POST',body:form,signal:AbortSignal.timeout(90000)});
+  const result=await response.json();
+  if(!response.ok||!result.ok)throw new Error(result.message||'Не удалось отправить. Попробуйте ещё раз.');
+  const o=storeDraft('sent');o.serverId=result.id;save();
+  S.last=o;S.w=null;S.tab='done';S.anim='af';hap('success');
+ }catch(e){S.submitError=e.name==='TimeoutError'||e.name==='TypeError'?'Не удалось подтвердить отправку. Фото и данные сохранены — попробуйте повторно.':e.message}
+ finally{S.sending=false;render()}
+}
+$('#go').onclick=()=>{
+ if(S.sending||S.preparing)return;
+ if(!S.w){if(S.tab==='done'){S.tab='orders';render()}return}
+ S.errors=validate();if(Object.keys(S.errors).length){render();const first=Object.keys(S.errors)[0];$('#'+first)?.focus();return}
+ hap();if(S.step<2){storeDraft();S.step++;S.anim='af';return render()}return submitOrder();
+};
+async function compressPhoto(file){
+ if(!file.type.startsWith('image/')||file.size>25*1024*1024)throw new Error('Выберите фото размером до 25 МБ.');
+ const url=URL.createObjectURL(file),image=new Image();
+ try{
+  await new Promise((resolve,reject)=>{image.onload=resolve;image.onerror=()=>reject(new Error('Не удалось открыть фото. Попробуйте другой снимок.'));image.src=url});
+  if(!image.naturalWidth||!image.naturalHeight)throw new Error('Не удалось прочитать фото.');
+  let size=1600,blob;
+  for(let i=0;i<3;i++){
+   const scale=Math.min(1,size/Math.max(image.naturalWidth,image.naturalHeight));
+   const canvas=document.createElement('canvas');canvas.width=Math.max(1,Math.round(image.naturalWidth*scale));canvas.height=Math.max(1,Math.round(image.naturalHeight*scale));
+   const ctx=canvas.getContext('2d');ctx.fillStyle='#fff';ctx.fillRect(0,0,canvas.width,canvas.height);ctx.drawImage(image,0,0,canvas.width,canvas.height);
+   blob=await new Promise(resolve=>canvas.toBlob(resolve,'image/jpeg',.78));canvas.width=canvas.height=0;
+   if(blob&&blob.size<=2*1024*1024)break;size=1000-i*250;
+  }
+  if(!blob||blob.size>2*1024*1024)throw new Error('Не удалось уменьшить фото. Выберите другой снимок.');
+  return {blob,url:URL.createObjectURL(blob)};
+ }finally{URL.revokeObjectURL(url)}
+}
+async function addPhotos(files){
+ const w=S.w;if(!w||S.preparing)return;
+ w.photos=w.photos||[];S.preparing=true;S.photoError='';
+ const y=$('#view').scrollTop;render();$('#view').scrollTop=y;
+ try{
+  for(const file of files){
+   if(w.photos.length>=5){S.photoError='Можно добавить до 5 фотографий.';break}
+   try{const photo=await compressPhoto(file);w.photos.push(photo)}catch(e){S.photoError=e.message}
+  }
+ }finally{S.preparing=false;if(S.w===w){storeDraft();render();$('#view').scrollTop=y}}
+}
+function render(){edgeBack.cancel();const wiz=!!S.w,v=$('#view');const active=document.activeElement;if(active&&v.contains(active)&&active.matches('input,textarea,select'))active.blur();v.className=S.anim;S.anim='';v.innerHTML=wiz?wizard():({home,orders,done}[S.tab]||home)();v.scrollTop=0;v.focus({preventScroll:true});$('#dock').hidden=!wiz&&S.tab!=='done';$('#tabs').hidden=wiz||S.tab==='done';if(!wiz&&S.tab==='done')$('#go').textContent='Мои заявки';document.querySelectorAll('#tabs button').forEach(b=>b.setAttribute('aria-current',b.dataset.v===S.tab));if(inTg)(wiz||S.tab==='done')?tg.BackButton.show():tg.BackButton.hide();if(wiz)refresh();$('#view').inert=S.sending;const pf=$('#photo-input');if(pf)pf.onchange=e=>addPhotos([...e.target.files])}
 const keep=fn=>{const y=$('#view').scrollTop;fn();render();$('#view').scrollTop=y};
-document.addEventListener('click',e=>{const b=e.target.closest('[data-a]');if(!b)return;const a=b.dataset.a,v=b.dataset.v,k=b.dataset.k,w=S.w;hap();
+document.addEventListener('click',e=>{const b=e.target.closest('[data-a]');if(!b)return;const a=b.dataset.a,v=b.dataset.v,k=b.dataset.k,w=S.w;if(S.sending||S.preparing)return;hap();
  if(a==='tab'){S.tab=v;S.anim='af';return render()}
- if(a==='start'){S.w=newW(v);S.step=0;S.errors={};S.anim='af';return render()}
- if(a==='again'||a==='open-request'){const o=S.orders.find(x=>x.id===v);if(!o)return;if(a==='open-request'&&o.status!=='draft'){S.last=o;S.tab='done';return render()}S.w={...newW(o.sv),...o,...(a==='again'?{id:null,date:'',slot:0}: {})};S.step=a==='again'?0:Math.min(o.step||0,2);S.errors={};return render()}
+ if(a==='start'){S.submitError='';S.photoError='';S.w=newW(v);S.step=0;S.errors={};S.anim='af';return render()}
+ if(a==='again'||a==='open-request'){const o=S.orders.find(x=>x.id===v);if(!o)return;if(a==='open-request'&&o.status!=='draft'){S.last=o;S.tab='done';return render()}const cached=a==='again'?[]:photoCache.get(o.id)||[];S.photoError=a!=='again'&&o.photoCount&&!cached.length?'Фото из черновика нужно добавить заново.':'';S.submitError='';S.w={...newW(o.sv),...o,...(a==='again'?{id:null,serverId:null,submitId:null,date:'',slot:0}: {}),photos:cached};S.step=a==='again'?0:Math.min(o.step||0,2);S.errors={};return render()}
  if(a==='back')return back();
  if(a==='exit'){if(w.desc.trim()||w.addr.trim()||w.phone.trim())storeDraft();S.w=null;S.errors={};S.tab='home';S.anim='ab';return render()}
  if(a==='edit'){S.step=+v;S.errors={};return render()}
- if(a==='edit-last'){S.w={...S.last};S.step=0;S.errors={};return render()}
+ if(a==='edit-last'){S.submitError='';S.w={...S.last,photos:photoCache.get(S.last.id)||[]};S.step=0;S.errors={};return render()}
+ if(a==='add-photo'){return $('#photo-input')?.click()}
+ if(a==='remove-photo'){const p=w.photos.splice(+v,1)[0];if(p)URL.revokeObjectURL(p.url);storeDraft();return keep(()=>{})}
  if(a==='sheet')return openSheet(v);
  if(a==='close')return close();
  if(a==='mo'){const d=new Date(S.cal.y,S.cal.m + +v,1);S.cal={y:d.getFullYear(),m:d.getMonth()};$('#sheet').innerHTML=sheetHTML()+'<button class="btn2" data-a="close">Закрыть</button>';return}
@@ -412,7 +484,7 @@ const edgeBack=(()=>{
   timer=setTimeout(()=>{cancel();if(commit)back(false)},duration);
  }
  app.addEventListener('touchstart',e=>{
-  if(drag||S.sheet||(!S.w&&S.tab!=='done')||e.touches.length!==1)return;
+  if(drag||S.sending||S.preparing||S.sheet||(!S.w&&S.tab!=='done')||e.touches.length!==1)return;
   const t=e.touches[0],bounds=app.getBoundingClientRect();
   if(t.clientX<bounds.left||t.clientX>bounds.left+28||t.clientY<bounds.top||t.clientY>bounds.bottom)return;
   if(e.target.closest('input,textarea,select,.days'))return;

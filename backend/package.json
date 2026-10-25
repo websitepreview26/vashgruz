@@ -1,0 +1,12 @@
+{
+  "name": "vashgruz-api",
+  "private": true,
+  "type": "module",
+  "engines": { "node": ">=24" },
+  "scripts": {
+    "test": "node --test test/*.test.mjs",
+    "deploy": "wrangler deploy",
+    "migrate": "wrangler d1 migrations apply vashgruz-orders --remote"
+  },
+  "devDependencies": { "wrangler": "4.149.0" }
+}
