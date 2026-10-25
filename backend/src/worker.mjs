@@ -2,7 +2,7 @@ import {createStatusService,statusKeyboard,compactCaption} from './statuses.mjs'
 // HTTP/FormData + Telegram API. Only persistence and env bindings are Cloudflare-specific.
 const MAX_BODY = 12 * 1024 * 1024;
 const MAX_PHOTO = 2 * 1024 * 1024;
-const names = {trash:'Вывоз мусора',flat:'Квартирный переезд',office:'Офисный переезд',load:'Услуги грузчиков',rig:'Такелаж',dem:'Демонтаж'};
+const names = {trash:'Вывоз мусора',construction:'Вывоз строительного мусора',furniture:'Вывоз старой мебели',flat:'Квартирный переезд',office:'Офисный переезд',load:'Услуги грузчиков',rig:'Такелаж',dem:'Демонтаж'};
 const slots = ['По согласованию','Утро: 8:00–12:00','День: 12:00–17:00','Вечер: 17:00–21:00'];
 const enc = new TextEncoder();
 class HttpError extends Error {

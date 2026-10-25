@@ -390,3 +390,10 @@ test('contact card remains when saving phone fails',async()=>{
  const e={...env(),TELEGRAM_WEBHOOK_SECRET:WEBHOOK_SECRET},calls=telegramMock();e.sqlite.exec('DROP TABLE customer_contacts');
  assert.equal((await worker.fetch(ownContactUpdate(),e)).status,500);assert.equal(calls.length,0);
 });
+
+test('furniture removal is accepted as a distinct service and named in the manager card',async()=>{
+ const e=env(),calls=telegramMock();
+ const response=await worker.fetch(await request({data:{...order(),sv:'furniture',desc:'Диван и два кресла'}}),e);
+ assert.equal(response.status,200);assert.match(calls[0].form.get('text'),/Вывоз старой мебели/);
+ assert.equal(JSON.parse(e.sqlite.prepare('SELECT payload FROM orders').get().payload).sv,'furniture');
+});

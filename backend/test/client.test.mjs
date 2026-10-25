@@ -100,10 +100,10 @@ test('unreadable photo produces a visible error instead of silently keeping empt
 
 test('both moving addresses are visible together; next is disabled until both are entered',()=>{
  const c=client();c.run("S.w=newW('flat');S.step=1;render()");
- assert(c.node('#go').disabled);assert.equal(c.node('#go').textContent,'Укажите адрес погрузки');
- c.run("S.w.addr='Минск, Ленина 1';refresh()");assert(c.node('#go').disabled);assert.equal(c.node('#go').textContent,'Укажите адрес выгрузки');
+ assert(c.node('#go').disabled);assert.equal(c.node('#go').textContent,'Укажите адрес точки А');
+ c.run("S.w.addr='Минск, Ленина 1';refresh()");assert(c.node('#go').disabled);assert.equal(c.node('#go').textContent,'Укажите адрес точки Б');
  c.run("S.w.to='Минск, Кирова 2';refresh()");assert.equal(c.node('#go').disabled,false);assert.equal(c.node('#go').textContent,'Далее: контакт');
- const view=c.node('#view').innerHTML;assert(view.indexOf('id="to"')<view.indexOf('На погрузке'));assert.equal(c.run('S.step'),1);
+ const view=c.node('#view').innerHTML;assert(view.indexOf('id="addr"')<view.indexOf('data-k="floor"'));assert(view.indexOf('data-k="floor"')<view.indexOf('id="to"'));assert(view.indexOf('id="to"')<view.indexOf('data-k="toFloor"'));assert.equal(c.run('S.step'),1);
 });
 test('Telegram phone sharing fills contact without a name field and caches number for next order',async()=>{
  const c=client({live:true});c.tg.requestContact=cb=>cb(true);

@@ -207,6 +207,24 @@ body{background:var(--bg)}.app-toolbar{display:flex;align-items:center;justify-c
 .order-open{margin:15px -16px -16px;padding:13px 16px;display:flex;align-items:center;justify-content:space-between;width:calc(100% + 32px);border-top:1px solid var(--line);font-size:13px;text-align:left}.order-open svg{width:17px;height:17px;color:var(--mut)}.order-description{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
 .sheet-action{width:100%;text-align:left;padding:16px;border-radius:14px;background:var(--card);margin-top:8px;font-size:15px}.sheet-action:disabled{opacity:.6}.sheet-action.danger{color:#d66358}.order-notice{position:absolute;z-index:12;left:16px;right:16px;bottom:calc(85px + var(--app-safe-bottom) + var(--app-content-bottom));padding:15px 16px;border-radius:14px;background:var(--navy);color:#fff;box-shadow:0 5px 25px #0002;display:flex;align-items:center;justify-content:space-between;gap:12px;font-size:13px}.order-notice button{color:var(--acc);font-weight:600;font-size:13px}
 .draft-resume{display:flex;gap:8px;align-items:stretch;margin:0 0 18px}.draft-resume .resume{flex:1;min-width:0;margin:0}.draft-delete{flex:0 0 48px;display:grid;place-items:center;border-radius:17px;background:var(--card);color:var(--mut);border:1px solid var(--line)}.draft-delete svg{width:21px;height:21px}
+
+/* Local variation: horizontal service cards with the original background artwork. */
+.home-original .grid{grid-template-columns:1fr;gap:10px}
+.home-original .svc,.selected-service{min-height:84px;padding:18px;flex-direction:row;align-items:center;justify-content:space-between;gap:16px;border-radius:19px}
+.home-original .svc b,.selected-service b{position:relative;z-index:1;max-width:62%;font-size:16px;line-height:1.2}
+.home-original .svc small{position:relative;z-index:1;flex:none;margin:0;font-size:14px;white-space:nowrap;color:var(--ink);font-weight:500}
+.home-original .svc .bg,.selected-service .bg{top:-18px;right:48px;opacity:.07}
+.home-original .svc .bg svg,.selected-service .bg svg{width:120px;height:120px}
+@media(max-width:350px){.home-original .svc{padding:16px 14px;gap:12px}.home-original .svc b{font-size:15px}.home-original .svc small{font-size:13px}}
+
+.selected-service em{position:relative;z-index:1;flex:none;font-size:14px;color:var(--mut)}
+.input-card textarea{min-height:0;overflow-y:hidden;resize:none}
+.address-group{margin-bottom:14px;padding:14px;background:var(--card);border:1px solid var(--line);border-radius:19px}
+.address-group .field-label{margin-top:0}.address-group .fld{background:var(--bg);margin-bottom:4px}
+.address-group .conditions{padding:0;background:transparent;border:0;box-shadow:none}
+.address-group>.error:empty{display:none}
+.day-unsure{width:auto;min-width:116px;padding:10px 14px;display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:500;white-space:nowrap}
+.time-options{grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;margin-top:8px}.time-options .slot{justify-content:center;min-height:46px;padding:11px 5px;font-size:14px;font-weight:500;border-radius:12px}.time-options .slot[aria-pressed=true]{background:color-mix(in srgb,var(--acc) 12%,var(--card))}
 </style>
 </head>
 <body>
@@ -264,6 +282,8 @@ const $ = s => document.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 
 const P = {
+ construction:'M4 9h16l-2 11H6zM7 9l2-5 4 2 2-3 4 6M8 13l1 4M12 13v4M16 13l-1 4',
+ furniture:'M5 11V7a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v4M5 16h14M5 20v-3M19 20v-3M3 11h3v4h12v-4h3v7H3z',
  trash:'M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13M10 11v6M14 11v6', flat:'M3 11 12 4l9 7M5 10v10h14V10M10 20v-6h4v6',
  office:'M5 21V4h9v17M14 9h5v12M8 8h3M8 12h3M8 16h3M3 21h18', load:'M3 8l9-5 9 5v8l-9 5-9-5zM3 8l9 5 9-5M12 13v8',
  rig:'M4 21V4h10M4 8l10-4M14 4v8M12 12h4v3a2 2 0 1 1-4 0zM2 21h9', dem:'M13 4l7 7-3 3-7-7zM11 8 3 16l3 3 8-8',
@@ -276,13 +296,15 @@ const ic = k => `<svg viewBox="0 0 24 24"><path d="${P[k]}"/></svg>`;
 
 // До согласования тарифов стоимость рассчитывает менеджер.
 const SV = [
+ {id:'furniture',r:0,n:'Вывоз старой мебели',c:'#d99a00',d:'Диваны, шкафы, старая мебель',q:'Какую мебель нужно вывезти?',ph:'Например: диван, два кресла и разобранный шкаф'},
+ {id:'construction',r:0,n:'Вывоз строительного мусора',c:'#cc8651',d:'Мешки, бетон, плитка, остатки ремонта',q:'Какой строительный мусор нужно вывезти?',ph:'Например: 20 мешков с плиткой и остатки гипсокартона'},
  {id:'trash',r:85,n:'Вывоз мусора',c:'#ff8a3d',d:'Стройка, мебель, дача',q:'Что нужно вывезти?',ph:'Например: старый диван и 10 мешков после ремонта'},
  {id:'flat',r:55,n:'Квартирный переезд',c:'#3d8bff',d:'Вещи, мебель и техника',mv:1,q:'Что нужно перевезти?',ph:'Например: вещи из однокомнатной квартиры, диван и холодильник'},
  {id:'office',r:105,n:'Офисный переезд',c:'#7a5cff',d:'Мебель, техника, архив',mv:1,q:'Что нужно перевезти?',ph:'Например: 8 рабочих мест, шкафы с документами и оргтехника'},
  {id:'load',r:45,n:'Услуги грузчиков',c:'#19b36b',d:'Погрузка и разгрузка',q:'С чем нужна помощь?',ph:'Например: поднять холодильник и стиральную машину на 4-й этаж'},
- {id:'rig',r:50,n:'Такелаж',c:'#d99a00',d:'Тяжёлое и крупное',q:'Что нужно переместить?',ph:'Например: сейф около 300 кг, с первого этажа в машину'},
+ {id:'rig',hidden:true,r:50,n:'Такелаж',c:'#d99a00',d:'Тяжёлое и крупное',q:'Что нужно переместить?',ph:'Например: сейф около 300 кг, с первого этажа в машину'},
  {id:'dem',r:0,n:'Демонтаж',c:'#ff4d6d',d:'Разобрать и вывезти',q:'Что нужно разобрать?',ph:'Например: разобрать кухню и вывезти старые шкафы'}];
-const SLOTS = [['По согласованию','уточним вместе','chat'],['Утро','8:00–12:00','sun'],['День','12:00–17:00','clock'],['Вечер','17:00–21:00','clock']];
+const SLOTS = [['Любое','','chat'],['Утро','8:00–12:00','sun'],['День','12:00–17:00','clock'],['Вечер','17:00–21:00','clock']];
 const sv = id => SV.find(s => s.id === id) || SV[0];
 const iso = d => d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
 const plus = n => { const d = new Date(); d.setDate(d.getDate()+n); return d; };
@@ -318,36 +340,34 @@ if (inTg) tg.BackButton.onClick(back);
 function back(animated=true){if(S.sending||S.preparing||S.organizing)return;hap();if(S.discussing){S.discussing=false;return render(true)}if(S.sheet)return close();S.errors={};S.anim=animated===false?'':'ab';if(S.w&&S.step>0){storeDraft();S.step--;}else{if(S.w)storeDraft();const wasDone=S.tab==='done';S.w=null;S.tab=wasDone?'orders':'home'}render()}
 function home(){
  const draft=S.orders.find(o=>o.status==='draft');
- return `<div class="hrow"><h1>Что нужно вывезти<br>или перевезти?</h1></div>
+ return `<section class="home-original"><div class="hrow"><h1>Что нужно вывезти<br>или перевезти?</h1></div>
  ${draft?`<div class="draft-resume"><button class="quick-row resume" data-a="open-request" data-v="${esc(draft.id)}">${ic('list')}<div><b>Продолжить заполнение</b><small>${esc(sv(draft.sv).n)}</small></div>${ic('chev')}</button><button class="draft-delete" data-a="draft-delete" data-v="${esc(draft.id)}" aria-label="Удалить черновик">${ic('trash')}</button></div>`:''}
  <div class="sec home-section"><b>Услуги</b><small>цена за час</small></div>
- <div class="grid">${SV.map(s=>`<button class="svc" style="--c:${s.c}" data-a="start" data-v="${s.id}"><span class="bg">${ic(s.id)}</span><span class="ib">${ic(s.id)}</span><b>${s.n}</b><small>${s.r?'от '+s.r+' BYN':'по оценке'}</small></button>`).join('')}</div>`;
+ <div class="grid">${SV.filter(s=>!s.hidden).map(s=>`<button class="svc" style="--c:${s.c}" data-a="start" data-v="${s.id}"><span class="bg">${ic(s.id)}</span><b>${s.n}</b><small>${s.r?'от '+s.r+' BYN':'по оценке'}</small></button>`).join('')}</div></section>`;
 }
 const error = key => `<p class="error" id="err-${key}" role="alert">${esc(S.errors[key]||'')}</p>`;
 const addressField=(key,label,placeholder)=>`<label class="field-label" for="${key}">${label}</label><div class="fld ${S.errors[key]?'invalid':''}">${ic('pin')}<input id="${key}" data-f="${key}" maxlength="220" autocomplete="street-address" aria-describedby="err-${key}" aria-invalid="${!!S.errors[key]}" enterkeyhint="${key==='addr'&&sv(S.w.sv).mv?'next':'done'}" placeholder="${placeholder}" value="${esc(S.w[key])}"></div>${error(key)}`;
-function conditions(prefix,title){const w=S.w,f=prefix?'toFloor':'floor',l=prefix?'toLift':'lift';return `<p class="conditions-title">${title}</p><div class="card conditions"><div class="rw"><span>Этаж</span><div class="stp"><button data-a="fl" data-k="${f}" data-v="-1" aria-label="Уменьшить этаж" ${w[f]<=1?'disabled':''}>−</button><b>${w[f]}</b><button data-a="fl" data-k="${f}" data-v="1" aria-label="Увеличить этаж" ${w[f]>=50?'disabled':''}>+</button></div></div><div class="rw"><span>Есть лифт</span><button class="sw" role="switch" aria-checked="${w[l]}" aria-label="Есть лифт: ${title}" data-a="tgl" data-k="${l}"></button></div></div>`}
+function conditions(prefix,title,showTitle=true){const w=S.w,f=prefix?'toFloor':'floor',l=prefix?'toLift':'lift';return `${showTitle?`<p class="conditions-title">${title}</p>`:''}<div class="card conditions"><div class="rw"><span>Этаж</span><div class="stp"><button data-a="fl" data-k="${f}" data-v="-1" aria-label="Уменьшить этаж" ${w[f]<=1?'disabled':''}>−</button><b>${w[f]}</b><button data-a="fl" data-k="${f}" data-v="1" aria-label="Увеличить этаж" ${w[f]>=50?'disabled':''}>+</button></div></div><div class="rw"><span>Есть лифт</span><button class="sw" role="switch" aria-checked="${w[l]}" aria-label="Есть лифт: ${title}" data-a="tgl" data-k="${l}"></button></div></div>`}
 function wizard(){
  const w=S.w,s=sv(w.sv),seg=[0,1,2].map(i=>`<i class="${i<=S.step?'on':''}"></i>`).join('');
  const bar=`<div class="bar"><button id="bk" data-a="back" aria-label="Назад">${ic('back')}</button><div class="seg">${seg}</div></div><p class="step-label">Шаг ${S.step+1} из 3 · ${['Задача','Место и время','Контакт'][S.step]}</p>`;
  if(S.step===0)return bar+`<div class="hd"><h1>${s.q}</h1><p class="sub">Коротко: что и сколько.</p></div>
- <button class="pill" style="--c:${s.c}" data-a="sheet" data-v="svc"><span class="ib sm">${ic(s.id)}</span><b>${s.n}</b><em>Изменить</em></button>
- <label class="field-label" for="desc">Что и примерно сколько? <span style="font-weight:400;color:var(--mut)">· необязательно</span></label><div class="card input-card"><textarea id="desc" class="task-input" data-f="desc" maxlength="1000" aria-describedby="err-desc" aria-invalid="${!!S.errors.desc}" placeholder="${s.ph}">${esc(w.desc)}</textarea></div>${error('desc')}
+ <button class="pill svc selected-service" style="--c:${s.c}" data-a="sheet" data-v="svc"><span class="bg" aria-hidden="true">${ic(s.id)}</span><b>${s.n}</b><em>Изменить</em></button>
+ <label class="field-label" for="desc">Что и примерно сколько? <span style="font-weight:400;color:var(--mut)">· необязательно</span></label><div class="card input-card"><textarea rows="1" id="desc" class="task-input" data-f="desc" maxlength="1000" aria-describedby="err-desc" aria-invalid="${!!S.errors.desc}" placeholder="${s.ph}">${esc(w.desc)}</textarea></div>${error('desc')}
  <div class="sec"><b>Фото</b><small role="status">${(w.photos||[]).length?'Добавлено: '+w.photos.length+' из 5':'необязательно · до 5'}</small></div><p class="error" id="photo-error" role="alert">${esc(S.photoError)}</p><div class="photo-grid">${(w.photos||[]).map((p,i)=>`<div class="photo-item"><img src="${p.url}" alt="Фото ${i+1}"><button data-a="remove-photo" data-v="${i}" aria-label="Удалить фото ${i+1}">${ic('x')}</button></div>`).join('')}${(w.photos||[]).length<5?`<label class="photo-add" for="photo-input" role="button" tabindex="0" aria-disabled="${S.preparing}">${ic('cam')}<span>${S.preparing?'Подготовка…':'Добавить'}</span></label>`:''}</div>`;
  if(S.step===1)return bar+`<div class="hd"><h1>${s.mv?'Откуда и куда?':'Куда приехать?'}</h1><p class="sub">Адрес и удобное время.</p></div>
- ${addressField('addr',s.mv?'Адрес погрузки':'Адрес','Улица, дом, населённый пункт')}
- ${s.mv?addressField('to','Адрес выгрузки','Улица, дом, населённый пункт'):''}
- ${conditions('',s.mv?'На погрузке':'Условия на месте')}${s.mv?conditions('to','На выгрузке'):''}
- <div class="card conditions" style="margin-top:10px"><div class="rw"><span>Нужна разборка</span><button class="sw" role="switch" aria-checked="${w.dis}" aria-label="Нужна разборка" data-a="tgl" data-k="dis"></button></div></div>
+ <section class="address-group" aria-label="${s.mv?'Точка А':'Место работы'}">${addressField('addr',s.mv?'Точка А — откуда забрать':'Адрес','Улица, дом, населённый пункт')}${conditions('',s.mv?'В точке А':'Условия на месте',false)}</section>
+ ${s.mv?`<section class="address-group" aria-label="Точка Б">${addressField('to','Точка Б — куда привезти','Улица, дом, населённый пункт')}${conditions('to','В точке Б',false)}</section>`:''}
  <div class="sec"><b>Когда удобно?</b><small>Можно уточнить позже</small></div>${error('date')}
- <div class="days"><button class="day" style="width:103px" data-a="day" data-v="" aria-pressed="${!w.date}"><small>Уточним</small><b style="font-size:14px">Позже</b></button>${Array.from({length:5},(_,i)=>plus(i)).map((d,i)=>`<button class="day" data-a="day" data-v="${iso(d)}" aria-pressed="${iso(d)===w.date}"><small>${i===0?'Сегодня':i===1?'Завтра':d.toLocaleDateString('ru-RU',{weekday:'short'})}</small><b>${d.getDate()}</b></button>`).join('')}</div>
+ <div class="days"><button class="day day-unsure" data-a="day" data-v="" aria-pressed="${!w.date}">Пока не знаю</button>${Array.from({length:5},(_,i)=>plus(i)).map((d,i)=>`<button class="day" data-a="day" data-v="${iso(d)}" aria-pressed="${iso(d)===w.date}"><small>${i===0?'Сегодня':i===1?'Завтра':d.toLocaleDateString('ru-RU',{weekday:'short'})}</small><b>${d.getDate()}</b></button>`).join('')}</div>
  <button class="fld" data-a="sheet" data-v="cal">${ic('cal')}<span class="v">${w.date?esc(fd(w.date)):'Выбрать другую дату'}</span>${ic('chev')}</button>
- ${w.date?`<div class="slots">${SLOTS.map((t,i)=>`<button class="slot" data-a="slot" data-v="${i}" aria-pressed="${i===w.slot}">${ic(t[2])}<span><b>${t[0]}</b><small>${t[1]}</small></span></button>`).join('')}</div>`:''}`;
+ ${w.date?`<p class="conditions-title">Удобное время</p><div class="slots time-options" role="group" aria-label="Удобное время">${SLOTS.map((t,i)=>`<button class="slot" data-a="slot" data-v="${i}" aria-pressed="${i===w.slot}">${t[0]}</button>`).join('')}</div><p class="hint">Точное время согласуем после оценки.</p>`:''}`;
  return bar+`<div class="hd"><h1>Контакт</h1><p class="sub">Для согласования стоимости.</p></div>
  ${contactControl(w)}
  <div class="sec"><b>Ваша задача</b><button class="review-edit" data-a="edit" data-v="0">Изменить</button></div>${ticket(w)}
  <p class="error" role="alert">${esc(S.submitError)}</p>${API_BASE?'':'<p class="fine">Демо-режим: отправка ещё не подключена.</p>'}`;
 }
-function ticket(w){const s=sv(w.sv);const rows=[['Услуга',s.n],['Задача',w.desc||'Без описания'],...((w.photos?.length||w.photoCount)?[['Фото',String(w.photos?.length||w.photoCount)+' шт.']]:[]),['Адрес',w.addr],['Условия',`${w.floor} этаж, ${w.lift?'есть лифт':'без лифта'}`],...(s.mv?[['Куда',w.to],['На выгрузке',`${w.toFloor} этаж, ${w.toLift?'есть лифт':'без лифта'}`]]:[]),...(w.dis?[['Разборка','Нужна']]:[]),['Когда',fd(w.date)+(w.date&&w.slot?', '+SLOTS[w.slot][0].toLowerCase():'')]];return `<div class="ticket">${rows.map(([a,b])=>`<div class="r"><span>${a}</span><b>${esc(b)}</b></div>`).join('')}<div class="r tot"><span>${w.quote?'Предложение':'Стоимость'}</span><b style="font-size:16px">${w.quote?quoteMoney(w.quote.amountMinor):'После оценки'}</b></div></div>`}
+function ticket(w){const s=sv(w.sv);const rows=[['Услуга',s.n],['Задача',w.desc||'Без описания'],...((w.photos?.length||w.photoCount)?[['Фото',String(w.photos?.length||w.photoCount)+' шт.']]:[]),['Адрес',w.addr],['Условия',`${w.floor} этаж, ${w.lift?'есть лифт':'без лифта'}`],...(s.mv?[['Куда',w.to],['На выгрузке',`${w.toFloor} этаж, ${w.toLift?'есть лифт':'без лифта'}`]]:[]),...(w.dis?[['Разборка','Нужна']]:[]),['Когда',fd(w.date)+(w.date?', '+(w.slot?SLOTS[w.slot][0].toLowerCase():'любое время'):'')]];return `<div class="ticket">${rows.map(([a,b])=>`<div class="r"><span>${a}</span><b>${esc(b)}</b></div>`).join('')}<div class="r tot"><span>${w.quote?'Предложение':'Стоимость'}</span><b style="font-size:16px">${w.quote?quoteMoney(w.quote.amountMinor):'После оценки'}</b></div></div>`}
 const ORDER_STATES={
  received:{title:'Заявка на оценку получена',short:'Получена',text:'Оценим задачу и предложим стоимость. Заказ пока не подтверждён.'},
  processing:{title:'На оценке',text:'Менеджер изучает задачу. Здесь появятся цена и условия.'},
@@ -383,7 +403,7 @@ function quoteMoney(minor){return (Number(minor)/100).toLocaleString('ru-RU',{ma
 function quoteCard(o){
  if(!o.quote)return '';
  const current=o.businessStatus==='quoted';
- return `<section class="quote-card"><small>${o.businessStatus==='discussion'?'Предыдущее предложение':'Предложение по вашей задаче'}</small><strong>${quoteMoney(o.quote.amountMinor)}</strong>${o.quote.note?`<p class="quote-note">${esc(o.quote.note)}</p>`:''}${current?S.discussing?`<label class="field-label" for="discussion-note">Что хотите уточнить? <span style="font-weight:400;color:var(--mut)">· необязательно</span></label><div class="card input-card"><textarea id="discussion-note" data-quote-note maxlength="400" placeholder="Например: можно ли снизить цену, если помогу с погрузкой?">${esc(S.discussionText)}</textarea></div><button class="btn2" data-a="cancel-discussion">Назад к предложению</button>`:`<button class="btn2" data-a="discuss-quote">Уточнить условия</button><p class="fine">Если цена или условия не подходят, обсудим варианты.</p>`:''}${S.decisionError?`<p class="error" role="alert">${esc(S.decisionError)}</p>`:''}</section>`;
+ return `<section class="quote-card"><small>${o.businessStatus==='discussion'?'Предыдущее предложение':'Предложение по вашей задаче'}</small><strong>${quoteMoney(o.quote.amountMinor)}</strong>${o.quote.note?`<p class="quote-note">${esc(o.quote.note)}</p>`:''}${current?S.discussing?`<label class="field-label" for="discussion-note">Что хотите уточнить? <span style="font-weight:400;color:var(--mut)">· необязательно</span></label><div class="card input-card"><textarea rows="1" id="discussion-note" data-quote-note maxlength="400" placeholder="Например: можно ли снизить цену, если помогу с погрузкой?">${esc(S.discussionText)}</textarea></div><button class="btn2" data-a="cancel-discussion">Назад к предложению</button>`:`<button class="btn2" data-a="discuss-quote">Уточнить условия</button><p class="fine">Если цена или условия не подходят, обсудим варианты.</p>`:''}${S.decisionError?`<p class="error" role="alert">${esc(S.decisionError)}</p>`:''}</section>`;
 }
 const decisionIds=new Map();
 async function decideQuote(action){
@@ -476,7 +496,7 @@ async function undoOrder(){
 }
 function sheetHTML(){
  if(S.sheet==='order-actions'||S.sheet==='order-confirm')return orderActionsSheet();
- if(S.sheet==='svc')return `<div class="grab"></div><h3>Услуга</h3>${SV.map(s=>`<button class="opt" style="--c:${s.c}" data-a="pick" data-v="${s.id}" aria-pressed="${S.w.sv===s.id}"><span class="ib sm">${ic(s.id)}</span><div><b>${s.n}</b><small>${s.d}</small></div>${S.w.sv===s.id?ic('check'):''}</button>`).join('')}`;
+ if(S.sheet==='svc')return `<div class="grab"></div><h3>Услуга</h3>${SV.filter(s=>!s.hidden).map(s=>`<button class="opt" style="--c:${s.c}" data-a="pick" data-v="${s.id}" aria-pressed="${S.w.sv===s.id}"><span class="ib sm">${ic(s.id)}</span><div><b>${s.n}</b><small>${s.d}</small></div>${S.w.sv===s.id?ic('check'):''}</button>`).join('')}`;
  const {y,m}=S.cal,w=S.w,first=new Date(y,m,1),off=(first.getDay()+6)%7,n=new Date(y,m+1,0).getDate(),now=new Date();
  const cells=Array(off).fill('<span></span>').concat(Array.from({length:n},(_,i)=>{const d=iso(new Date(y,m,i+1));return `<button data-a="pickd" data-v="${d}" class="${d===today()?'now ':''}${d===w.date?'sel':''}" ${d<today()?'disabled':''} aria-label="${fd(d)}">${i+1}</button>`}));
  return `<div class="grab"></div><h3>Выберите дату</h3><div class="cal"><div class="cal-h"><button data-a="mo" data-v="-1" ${y===now.getFullYear()&&m===now.getMonth()?'disabled':''} aria-label="Прошлый месяц">${ic('back')}</button><b>${first.toLocaleDateString('ru-RU',{month:'long',year:'numeric'})}</b><button data-a="mo" data-v="1" aria-label="Следующий месяц">${ic('chev')}</button></div><div class="cal-g">${['Пн','Вт','Ср','Чт','Пт','Сб','Вс'].map(x=>`<span class="w">${x}</span>`).join('')}${cells.join('')}</div></div>`;
@@ -558,7 +578,7 @@ async function requestPhone(){
  }catch(e){diagnostic.stage=e.message==='timeout'?'callback_timeout':'failed';diagnostic.error=diagnostic.error||e.message;void fetchContact(diagnostic).catch(()=>{});if(S.w===w){S.phoneManual=true;S.contactError='Не удалось получить номер. Можно ввести его вручную.'}}
  finally{S.contactBusy=false;if(S.w)render(true)}
 }
-function missingAddress(){if(!S.w||S.step!==1)return '';if(S.w.addr.trim().length<5)return sv(S.w.sv).mv?'Укажите адрес погрузки':'Укажите адрес';if(sv(S.w.sv).mv&&S.w.to.trim().length<5)return 'Укажите адрес выгрузки';return ''}
+function missingAddress(){if(!S.w||S.step!==1)return '';if(S.w.addr.trim().length<5)return sv(S.w.sv).mv?'Укажите адрес точки А':'Укажите адрес';if(sv(S.w.sv).mv&&S.w.to.trim().length<5)return 'Укажите адрес точки Б';return ''}
 function refresh(){if(S.w){const missing=missingAddress(),needsPhone=S.step===2&&!validPhone(S.w.phone);$('#go').disabled=S.sending||S.preparing||S.contactBusy||!!missing||needsPhone;$('#go').textContent=S.sending?'Отправляем…':S.preparing?'Подготавливаем фото…':S.contactBusy?'Ожидаем номер…':missing|| (needsPhone?'Укажите номер':S.step===2?'Получить оценку':S.step===0?'Далее: адрес':'Далее: контакт')}}
 function storeDraft(status='draft'){
  const w=S.w;if(!w)return null;
@@ -646,7 +666,21 @@ async function addPhotos(files){
   }
  }finally{S.preparing=false;if(S.w===w){storeDraft();render();$('#view').scrollTop=y}}
 }
-function render(preserve=false){edgeBack.cancel();const oldScroll=$('#view').scrollTop;const wiz=!!S.w,v=$('#view');const active=document.activeElement;if(active&&v.contains(active)&&active.matches('input,textarea,select'))active.blur();v.className=S.anim;S.anim='';v.innerHTML=wiz?wizard():({home,orders,done}[S.tab]||home)();v.scrollTop=preserve?oldScroll:0;if(!preserve)v.focus({preventScroll:true});$('#dock').hidden=!wiz&&S.tab!=='done';$('#tabs').hidden=wiz||S.tab==='done';if(!wiz&&S.tab==='done'){$('#go').disabled=S.sending;$('#go').textContent=S.sending?'Отправляем…':S.last?.businessStatus==='quoted'?(S.discussing?'Отправить вопрос':'Подходит, согласовать'):'Мои заявки';}document.querySelectorAll('#tabs button').forEach(b=>b.setAttribute('aria-current',b.dataset.v===S.tab));if(inTg)(wiz||S.tab==='done')?tg.BackButton.show():tg.BackButton.hide();if(wiz)refresh();$('#view').inert=S.sending;scheduleStatuses()}
+function fitTextarea(field){
+ const width=String(field.clientWidth);
+ if(!field.dataset.fitBase||field.dataset.fitWidth!==width){
+  const value=field.value,start=field.selectionStart,end=field.selectionEnd;
+  field.style.height='0px';field.value=field.placeholder||' ';
+  field.dataset.fitBase=String(field.scrollHeight);field.dataset.fitWidth=width;
+  field.value=value;
+  if(document.activeElement===field&&typeof field.setSelectionRange==='function')field.setSelectionRange(start,end);
+ }
+ field.style.height='0px';
+ field.style.height=Math.max(Number(field.dataset.fitBase)||0,field.scrollHeight)+'px';
+}
+function fitTextareas(){document.querySelectorAll('#view .input-card textarea').forEach(fitTextarea)}
+window.addEventListener('resize',()=>requestAnimationFrame(fitTextareas));
+function render(preserve=false){edgeBack.cancel();const oldScroll=$('#view').scrollTop;const wiz=!!S.w,v=$('#view');const active=document.activeElement;if(active&&v.contains(active)&&active.matches('input,textarea,select'))active.blur();v.className=S.anim;S.anim='';v.innerHTML=wiz?wizard():({home,orders,done}[S.tab]||home)();fitTextareas();v.scrollTop=preserve?oldScroll:0;if(!preserve)v.focus({preventScroll:true});$('#dock').hidden=!wiz&&S.tab!=='done';$('#tabs').hidden=wiz||S.tab==='done';if(!wiz&&S.tab==='done'){$('#go').disabled=S.sending;$('#go').textContent=S.sending?'Отправляем…':S.last?.businessStatus==='quoted'?(S.discussing?'Отправить вопрос':'Подходит, согласовать'):'Мои заявки';}document.querySelectorAll('#tabs button').forEach(b=>b.setAttribute('aria-current',b.dataset.v===S.tab));if(inTg)(wiz||S.tab==='done')?tg.BackButton.show():tg.BackButton.hide();if(wiz)refresh();$('#view').inert=S.sending;scheduleStatuses()}
 const keep=fn=>{const y=$('#view').scrollTop;fn();render();$('#view').scrollTop=y};
 document.addEventListener('click',e=>{const b=e.target.closest('[data-a]');if(!b)return;const a=b.dataset.a,v=b.dataset.v,k=b.dataset.k,w=S.w;if(S.sending||S.preparing||S.organizing)return;hap();
  if(a==='discuss-quote'){S.discussing=true;S.discussionText='';S.discussionVersion=S.last.statusVersion;S.decisionError='';return render(true)}
@@ -774,7 +808,7 @@ $('#photo-input').addEventListener('change',e=>{
 });
 document.addEventListener('click',e=>{if(e.target.closest('.photo-add')&&(S.preparing||S.sending))e.preventDefault()},true);
 document.addEventListener('keydown',e=>{if((e.key==='Enter'||e.key===' ')&&e.target.matches('.photo-add')&&!S.preparing&&!S.sending){e.preventDefault();$('#photo-input').click()}});
-document.addEventListener('input',e=>{if(e.target.hasAttribute('data-quote-note')){S.discussionText=e.target.value;return}const f=e.target.dataset.f;if(f&&S.w){S.w[f]=e.target.value;storeDraft();if(S.errors[f]){delete S.errors[f];$('#err-'+f).textContent='';e.target.setAttribute('aria-invalid','false');e.target.closest('.fld')?.classList.remove('invalid')}refresh()}});
+document.addEventListener('input',e=>{if(e.target.tagName==='TEXTAREA')fitTextarea(e.target);if(e.target.hasAttribute('data-quote-note')){S.discussionText=e.target.value;return}const f=e.target.dataset.f;if(f&&S.w){S.w[f]=e.target.value;storeDraft();if(S.errors[f]){delete S.errors[f];$('#err-'+f).textContent='';e.target.setAttribute('aria-invalid','false');e.target.closest('.fld')?.classList.remove('invalid')}refresh()}});
 document.addEventListener('keydown',e=>{if(!S.sheet)return;if(e.key==='Escape')return close();if(e.key==='Tab'){const items=[...document.querySelectorAll('#sheet button:not(:disabled), #sheet a')];const first=items[0],last=items[items.length-1];if(e.shiftKey&&document.activeElement===first){e.preventDefault();last.focus()}else if(!e.shiftKey&&document.activeElement===last){e.preventDefault();first.focus()}}});
 document.addEventListener('visibilitychange',()=>{if(!document.hidden)lastStatusFetch=0;scheduleStatuses()});
 if(inTg)tg.onEvent('activated',()=>{lastStatusFetch=0;scheduleStatuses()});
