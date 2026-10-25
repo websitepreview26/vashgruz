@@ -10,8 +10,9 @@ class Element {
   addEventListener(key,fn){this.listeners[key]=fn}
   focus(){}setAttribute(){}contains(){return false}querySelector(){return new Element()}
 }
-function client({live=false,fetcher}={}){
+function client({live=false,fetcher,initialOrders}={}){
   const nodes=new Map(),storage=new Map(),urls=new Set();let counter=0;
+  if(initialOrders)storage.set('vg-requests-v2',JSON.stringify(initialOrders));
   const node=k=>{if(!nodes.has(k))nodes.set(k,new Element());return nodes.get(k)};
   const tg={initData:'signed-test-data',platform:'ios',colorScheme:'light',initDataUnsafe:{user:{id:42,first_name:'Тест'}},ready(){},expand(){},disableVerticalSwipes(){},setHeaderColor(){},setBackgroundColor(){},setBottomBarColor(){},onEvent(){},MainButton:{hide(){}},BackButton:{onClick(){},hide(){},show(){}},HapticFeedback:{selectionChanged(){},notificationOccurred(){}}};
   const doc={querySelector:node,querySelectorAll:()=>[],addEventListener(){},documentElement:{dataset:{},style:{setProperty(){}},classList:{add(){}}},createElement(name){
@@ -64,7 +65,7 @@ test('server status replaces cached status, keeps drafts, and preserves scroll',
  c.run("S.orders=[{...remote,id:'local-sent',businessStatus:'received'},{id:'draft-1',sv:'trash',status:'draft',desc:'Черновик',date:''}];S.tab='orders';render()");
  c.node('#view').scrollTop=120;await c.run('syncOrders()');
  assert.equal(c.run('S.orders.length'),2);assert.equal(c.run('S.orders[0].businessStatus'),'processing');assert.equal(c.run('S.orders[0].id'),'local-sent');assert.equal(c.node('#view').scrollTop,120);
- assert.match(c.node('#view').innerHTML,/На оценке/);assert.match(c.node('#view').innerHTML,/Черновик/);
+ assert.match(c.node('#view').innerHTML,/На оценке/);assert(!c.node('#view').innerHTML.includes('Черновик'));assert.match(c.run('home()'),/Продолжить заполнение/);
 });
 test('status fetch failure keeps last known state instead of fabricating progress',async()=>{
  const c=client({live:true,fetcher:async()=>{throw Error('offline')}});
@@ -131,7 +132,7 @@ test('a changed quote is refreshed and never accepted automatically',async()=>{
 });
 
 test('active and archive tabs filter rows and show only first batch',()=>{
- const c=client();c.run("S.orders=Array.from({length:12},(_,i)=>({id:'draft-'+i,sv:'trash',status:'draft',date:'',desc:'Задача '+i,customerVisibility:i===11?'archived':'active'}));S.tab='orders';render()");
+ const c=client();c.run("S.orders=Array.from({length:12},(_,i)=>({id:'sent-'+i,serverId:'VG-'+i,sv:'trash',status:'sent',date:'',desc:'Задача '+i,customerVisibility:i===11?'archived':'active'}));S.tab='orders';render()");
  assert.equal((c.node('#view').innerHTML.match(/<article class="ord">/g)||[]).length,8);assert.match(c.node('#view').innerHTML,/Показать ещё \(3\)/);
  c.run("S.listTab='archive';render()");assert.equal((c.node('#view').innerHTML.match(/<article class="ord">/g)||[]).length,1);assert.match(c.node('#view').innerHTML,/Задача 11/);
 });
@@ -165,4 +166,30 @@ test('foreign callback contact is ignored; authenticated server contact is used 
  const c=client({live:true});c.tg.requestContact=cb=>cb(true,{responseUnsafe:{contact:{user_id:99,phone_number:'375291111111'}}});
  c.context.fetch=async()=>Response.json({ok:true,phone:'+375291234567',updatedAt:1});
  c.run("S.w=newW('trash');S.step=2;render()");await c.run('requestPhone()');assert.equal(c.run('S.w.phone'),'+375291234567');
+});
+
+test('empty service selection and cached phone do not create drafts; only latest meaningful form is kept',()=>{
+ const c=client();c.run("S.w=newW('trash');S.w.phone='+375291234567';storeDraft()");assert.equal(c.run('S.orders.length'),0);
+ c.run("S.w.desc='Диван';storeDraft();S.w=null");assert.equal(c.run('S.orders.length'),1);
+ const old=c.run('S.orders[0].id');
+ c.run("S.w=newW('flat');S.w.addr='Минск, Ленина 1';storeDraft()");assert.equal(c.run('S.orders.length'),1);assert.notEqual(c.run('S.orders[0].id'),old);
+ assert.equal(c.run('S.orders[0].sv'),'flat');assert.equal(c.run('photoCache.size'),1);
+ c.run("S.w.addr='';storeDraft()");assert.equal(c.run('S.orders.length'),0);
+});
+test('existing drafts consolidate at startup, keeping newest filled form and every sent order',()=>{
+ const c=client({initialOrders:[
+  {id:'sent',serverId:'VG-REAL',status:'sent',sv:'trash',date:'',desc:'Отправлена'},
+  {id:'old',status:'draft',sv:'trash',desc:'Старый',updatedAt:'2026-10-25T10:00:00Z'},
+  {id:'latest',status:'draft',sv:'flat',addr:'Минск, Ленина 1',updatedAt:'2026-10-25T12:00:00Z'},
+  {id:'empty',status:'draft',sv:'rig',phone:'+375291234567',updatedAt:'2026-10-25T13:00:00Z'}
+ ]});
+ assert.equal(c.run('S.orders.length'),2);assert.equal(c.run("S.orders.find(o=>o.status==='draft').id"),'latest');
+ c.run("S.tab='orders';render()");assert.match(c.node('#view').innerHTML,/VG-REAL/);assert(!c.node('#view').innerHTML.includes('Черновик'));
+ const home=c.run('home()');assert.match(home,/Продолжить заполнение/);assert.match(home,/data-a="draft-delete"/);assert(!home.includes('№'));
+ assert.equal(JSON.parse(c.storage.get('vg-requests-v2')).length,2);
+});
+test('drafts never enter list counts or archive, including before a status refresh',()=>{
+ const c=client();c.run("S.orders=[{id:'draft',status:'draft',sv:'trash',desc:'Незакончено',customerVisibility:'archived'},{id:'sent',status:'sent',serverId:'VG-SENT',sv:'trash',date:'',desc:'На оценке'}];S.tab='orders';render()");
+ assert.equal(c.run('visibleOrders().length'),1);assert.match(c.node('#view').innerHTML,/Активные <span>1/);assert.match(c.node('#view').innerHTML,/Архив <span>0/);
+ c.run("S.listTab='archive';render()");assert.equal(c.run('visibleOrders().length'),0);assert.match(c.node('#view').innerHTML,/Архив пуст/);
 });
