@@ -51,6 +51,16 @@ export function validateOrder(raw){
   if(location!==null&&(!['furniture','construction','trash'].includes(w.sv)||!['indoor','outside'].includes(location)))fail(400,'ORDER','Проверьте место погрузки.');
   if(location!==null)w.location=location;
   if(location==='outside'){w.floor=null;w.lift=null}
+  for(const [key,lift] of [['liftType','lift'],['toLiftType','toLift']]){
+    const value=raw[key]??null;
+    if(value!==null&&!['passenger','cargo'].includes(value))fail(400,'ORDER','Проверьте тип лифта.');
+    if(w[lift]===true&&value!==null)w[key]=value;
+  }
+  for(const [key,lift] of [['liftFirstFloor','lift'],['toLiftFirstFloor','toLift']]){
+    const value=raw[key]??null;
+    if(value!==null&&typeof value!=='boolean')fail(400,'ORDER','Проверьте этаж остановки лифта.');
+    if(w[lift]===true&&value!==null)w[key]=value;
+  }
   if(!Number.isInteger(raw.slot)||raw.slot<0||raw.slot>3)fail(400,'ORDER','Проверьте время.');w.slot=raw.slot;
   const date=text('date',10),today=new Date().toLocaleDateString('en-CA',{timeZone:'Europe/Minsk'});
   if(date&&(!/^\d{4}-\d{2}-\d{2}$/.test(date)||Number.isNaN(Date.parse(date+'T12:00:00Z'))||new Date(date+'T12:00:00Z').toISOString().slice(0,10)!==date||date<today))fail(400,'ORDER','Выберите сегодняшнюю или будущую дату.');
@@ -77,11 +87,11 @@ async function boundedForm(request){
   catch{fail(400,'FORMAT','Не удалось прочитать заявку.')}
 }
 export function orderMessage(w,id,user,photoCount){
-  const floor=(f,l)=>(Number.isInteger(f)?f+' этаж':'Этаж не указан')+', '+(l===true?'есть лифт':l===false?'без лифта':'лифт не указан');
+  const floor=(f,l,type,first)=>(Number.isInteger(f)?f+' этаж':'Этаж не указан')+', '+(l===true?(type==='cargo'?'грузовой лифт':type==='passenger'?'обычный лифт':'есть лифт'):l===false?'без лифта':'лифт не указан')+(l===true&&typeof first==='boolean'?(first?', до 1-го этажа':', только до 2-го этажа'):'');
   return [
     `Заявка на оценку ${id}`,names[w.sv],w.desc.replace(/\s+/g,' ')||'Без описания',
-    `Адрес: ${w.addr}`,w.location==='outside'?'Уже на улице':w.location==='indoor'?'Из помещения · '+floor(w.floor,w.lift):floor(w.floor,w.lift),
-    ...((w.sv==='flat'||w.sv==='office')?[`Куда: ${w.to}`,floor(w.toFloor,w.toLift)]:[]),
+    `Адрес: ${w.addr}`,w.location==='outside'?'Уже на улице':w.location==='indoor'?'Из помещения · '+floor(w.floor,w.lift,w.liftType,w.liftFirstFloor):floor(w.floor,w.lift,w.liftType,w.liftFirstFloor),
+    ...((w.sv==='flat'||w.sv==='office')?[`Куда: ${w.to}`,floor(w.toFloor,w.toLift,w.toLiftType,w.toLiftFirstFloor)]:[]),
     ...(w.dis?['Нужна разборка']:[]),`Когда: ${w.date||'По согласованию'}${w.date?', '+slots[w.slot]:''}`,
     `Имя: ${w.name||user.first_name||'Не указано'}`,`Телефон: ${w.phone}`,
     `Клиент: ${user.username?'@'+user.username+' · ':''}ID ${user.id}`,`Фото: ${photoCount}`

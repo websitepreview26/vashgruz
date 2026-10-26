@@ -409,3 +409,23 @@ test('unknown floor and lift remain unknown; outside pickup clears hidden condit
  assert.throws(()=>validateOrder({...order(),location:'garage'}),{code:'ORDER'});
  assert.throws(()=>validateOrder({...order(),sv:'flat',to:'Минск, Ленина 2',location:'outside'}),{code:'ORDER'});
 });
+
+test('lift type is validated and forwarded without retaining hidden choices',async()=>{
+ assert.equal(validateOrder({...order(),liftType:'cargo'}).liftType,'cargo');
+ assert(!Object.hasOwn(validateOrder({...order(),lift:false,liftType:'cargo'}),'liftType'));
+ assert(!Object.hasOwn(validateOrder({...order(),sv:'furniture',location:'outside',liftType:'cargo'}),'liftType'));
+ assert.throws(()=>validateOrder({...order(),liftType:'unknown'}),{code:'ORDER'});
+ const e=env(),calls=telegramMock();assert.equal((await worker.fetch(await request({data:{...order(),liftType:'passenger'}}),e)).status,200);
+ assert.match(calls[0].form.get('text'),/обычный лифт/);
+});
+
+test('lift landing is validated, ignores hidden choices and reaches manager with the lift type',async()=>{
+ const e=env(),calls=telegramMock();
+ assert.equal((await worker.fetch(await request({data:{...order(),liftType:'cargo',liftFirstFloor:false}}),e)).status,200);
+ assert.match(calls[0].form.get('text'),/грузовой лифт, только до 2-го этажа/);
+ assert.equal(JSON.parse(e.sqlite.prepare('SELECT payload FROM orders').get().payload).liftFirstFloor,false);
+ assert(!Object.hasOwn(validateOrder({...order(),lift:false,liftFirstFloor:false}),'liftFirstFloor'));
+ assert(!Object.hasOwn(validateOrder({...order(),sv:'furniture',location:'outside',liftFirstFloor:true}),'liftFirstFloor'));
+ assert.throws(()=>validateOrder({...order(),liftFirstFloor:2}),{code:'ORDER'});
+ assert(!Object.hasOwn(validateOrder(order()),'liftFirstFloor'));
+});

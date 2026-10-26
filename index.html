@@ -235,6 +235,8 @@ body{background:var(--bg)}.app-toolbar{display:flex;align-items:center;justify-c
 .home-original .draft-delete{flex-basis:44px;align-self:stretch;margin:10px 0;border:0;border-left:1px solid var(--line);border-radius:0;background:transparent}
 .home-original .draft-delete svg{width:19px;height:19px}
 .draft-confirm-actions{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin-top:20px}.draft-confirm-actions .sheet-action{margin:0;min-height:52px;padding:14px 8px;text-align:center;font-weight:600}
+.lift-details{border-top:1px solid var(--line)}
+.lift-landing{padding:12px 0 4px;border-top:1px solid var(--line)}.lift-landing p{font-size:13px;margin-bottom:9px}.lift-landing .lift-options{display:grid;grid-template-columns:1fr 2fr;gap:8px}.lift-landing button{min-height:40px;font-size:13px}
 </style>
 </head>
 <body>
@@ -309,9 +311,9 @@ const SV = [
  {id:'furniture',r:0,n:'Вывоз старой мебели',c:'#d99a00',d:'Диваны, шкафы, старая мебель',q:'Какую мебель нужно вывезти?',ph:'Например: диван, два кресла и разобранный шкаф'},
  {id:'construction',r:0,n:'Вывоз строительного мусора',c:'#cc8651',d:'Мешки, бетон, плитка, остатки ремонта',q:'Какой строительный мусор нужно вывезти?',ph:'Например: 20 мешков с плиткой и остатки гипсокартона'},
  {id:'trash',r:85,n:'Вывоз мусора',c:'#ff8a3d',d:'Стройка, мебель, дача',q:'Что нужно вывезти?',ph:'Например: старый диван и 10 мешков после ремонта'},
- {id:'flat',r:55,n:'Квартирный переезд',c:'#3d8bff',d:'Вещи, мебель и техника',mv:1,q:'Что нужно перевезти?',ph:'Например: вещи из однокомнатной квартиры, диван и холодильник'},
- {id:'office',r:105,n:'Офисный переезд',c:'#7a5cff',d:'Мебель, техника, архив',mv:1,q:'Что нужно перевезти?',ph:'Например: 8 рабочих мест, шкафы с документами и оргтехника'},
- {id:'load',r:45,n:'Услуги грузчиков',c:'#19b36b',d:'Погрузка и разгрузка',q:'С чем нужна помощь?',ph:'Например: поднять холодильник и стиральную машину на 4-й этаж'},
+ {id:'flat',hidden:true,r:55,n:'Квартирный переезд',c:'#3d8bff',d:'Вещи, мебель и техника',mv:1,q:'Что нужно перевезти?',ph:'Например: вещи из однокомнатной квартиры, диван и холодильник'},
+ {id:'office',hidden:true,r:105,n:'Офисный переезд',c:'#7a5cff',d:'Мебель, техника, архив',mv:1,q:'Что нужно перевезти?',ph:'Например: 8 рабочих мест, шкафы с документами и оргтехника'},
+ {id:'load',hidden:true,r:45,n:'Услуги грузчиков',c:'#19b36b',d:'Погрузка и разгрузка',q:'С чем нужна помощь?',ph:'Например: поднять холодильник и стиральную машину на 4-й этаж'},
  {id:'rig',hidden:true,r:50,n:'Такелаж',c:'#d99a00',d:'Тяжёлое и крупное',q:'Что нужно переместить?',ph:'Например: сейф около 300 кг, с первого этажа в машину'},
  {id:'dem',r:0,n:'Демонтаж',c:'#ff4d6d',d:'Разобрать и вывезти',q:'Что нужно разобрать?',ph:'Например: разобрать кухню и вывезти старые шкафы'}];
 const SLOTS = [['Любое','','chat'],['Утро','8:00–12:00','sun'],['День','12:00–17:00','clock'],['Вечер','17:00–21:00','clock']];
@@ -332,7 +334,7 @@ try {
 const linkedOrder=tg?.initDataUnsafe?.start_param|| (window.location?.search?'order_'+new URLSearchParams(window.location.search).get('order'):'');
 let pendingOrderId=/^order_(VG-[A-F0-9]{12})$/.exec(linkedOrder)?.[1]||null;
 if(pendingOrderId)S.tab='orders';
-const newW = id => ({photos:[],sv:id||'trash',desc:'',addr:'',to:'',floor:null,lift:null,toFloor:null,toLift:null,location:null,dis:false,date:'',slot:0,name:user?user.first_name:'',phone:cachedPhone()});
+const newW = id => ({photos:[],sv:id||'trash',desc:'',addr:'',to:'',floor:null,lift:null,toFloor:null,toLift:null,liftType:null,toLiftType:null,liftFirstFloor:null,toLiftFirstFloor:null,location:null,dis:false,date:'',slot:0,name:user?user.first_name:'',phone:cachedPhone()});
 function hasDraftContent(o){return !!(String(o.desc||'').trim()||String(o.addr||'').trim()||String(o.to||'').trim()||(o.photos?.length||o.photoCount)||o.date||o.dis||o.location||Number.isInteger(o.floor)||Number.isInteger(o.toFloor)||typeof o.lift==='boolean'||typeof o.toLift==='boolean'||o.slot>0)}
 function normalizeDrafts(){
  const drafts=S.orders.filter(o=>o.status!=='sent'&&o.customerVisibility!=='deleted'&&(!o.ownerId||o.ownerId===String(user?.id||'local'))&&hasDraftContent(o));
@@ -358,13 +360,18 @@ function home(){
 const error = key => `<p class="error" id="err-${key}" role="alert">${esc(S.errors[key]||'')}</p>`;
 const addressField=(key,label,placeholder)=>`<label class="field-label" for="${key}">${label}</label><div class="fld ${S.errors[key]?'invalid':''}"><input id="${key}" data-f="${key}" maxlength="220" autocomplete="street-address" aria-describedby="err-${key}" aria-invalid="${!!S.errors[key]}" enterkeyhint="${key==='addr'&&sv(S.w.sv).mv?'next':'done'}" placeholder="${placeholder}" value="${esc(S.w[key])}"></div>${error(key)}`;
 const isRemoval=id=>['furniture','construction','trash'].includes(id);
-function floorText(f,l){return (Number.isInteger(f)?f+' этаж':'Этаж не указан')+', '+(l===true?'есть лифт':l===false?'без лифта':'лифт не указан')}
+function floorText(f,l,type,first){return (Number.isInteger(f)?f+' этаж':'Этаж не указан')+', '+(l===true?(type==='cargo'?'грузовой лифт':type==='passenger'?'обычный лифт':'есть лифт'):l===false?'без лифта':'лифт не указан')+(l===true&&typeof first==='boolean'?(first?', до 1-го этажа':', только до 2-го этажа'):'')}
+function liftDetails(prefix){
+ const w=S.w,key=prefix?'toLiftType':'liftType',lift=prefix?'toLift':'lift',first=prefix?'toLiftFirstFloor':'liftFirstFloor';
+ if(w[lift]!==true)return '';
+ return `<div class="lift-details"><div class="rw"><span>Тип лифта</span><div class="lift-options" role="group" aria-label="Тип лифта${prefix?' в точке Б':''}">${[['passenger','Обычный'],['cargo','Грузовой']].map(([value,label])=>`<button data-a="lift-detail" data-k="${key}" data-v="${value}" aria-pressed="${w[key]===value}">${label}</button>`).join('')}</div></div><div class="lift-landing"><p>Лифт спускается на 1-й этаж?</p><div class="lift-options" role="group" aria-label="Лифт спускается на 1-й этаж${prefix?' в точке Б':''}">${[[true,'Да'],[false,'Нет, только до 2-го']].map(([value,label])=>`<button data-a="lift-landing" data-k="${first}" data-v="${value}" aria-pressed="${w[first]===value}">${label}</button>`).join('')}</div></div></div>`;
+}
 function conditions(prefix,title,showTitle=true){
  const w=S.w,f=prefix?'toFloor':'floor',l=prefix?'toLift':'lift';
  const place=!prefix&&isRemoval(w.sv);
  const where=place?`<div class="pickup-place" role="group" aria-label="Откуда забирать"><button data-a="pickup-place" data-v="indoor" aria-pressed="${w.location==='indoor'}">Из помещения</button><button data-a="pickup-place" data-v="outside" aria-pressed="${w.location==='outside'}">Уже на улице</button></div>`:'';
  if(place&&w.location!=='indoor')return where;
- return `${showTitle?`<p class="conditions-title">${title}</p>`:''}${where}<div class="card conditions"><div class="rw"><span>Этаж <small class="condition-optional">необязательно</small></span><div class="stp"><button data-a="fl" data-k="${f}" data-v="-1" aria-label="Уменьшить этаж" ${!Number.isInteger(w[f])?'disabled':''}>−</button><b>${Number.isInteger(w[f])?w[f]:'—'}</b><button data-a="fl" data-k="${f}" data-v="1" aria-label="Увеличить этаж" ${w[f]>=50?'disabled':''}>+</button></div></div><div class="rw"><span>Лифт</span><div class="lift-options" role="group" aria-label="Лифт: ${title}">${[[true,'Есть'],[false,'Нет']].map(([value,label])=>`<button data-a="lift-choice" data-k="${l}" data-v="${value}" aria-pressed="${value===w[l]||value===null&&w[l]===undefined}">${label}</button>`).join('')}</div></div></div>`;
+ return `${showTitle?`<p class="conditions-title">${title}</p>`:''}${where}<div class="card conditions"><div class="rw"><span>Этаж <small class="condition-optional">необязательно</small></span><div class="stp"><button data-a="fl" data-k="${f}" data-v="-1" aria-label="Уменьшить этаж" ${!Number.isInteger(w[f])?'disabled':''}>−</button><b>${Number.isInteger(w[f])?w[f]:'—'}</b><button data-a="fl" data-k="${f}" data-v="1" aria-label="Увеличить этаж" ${w[f]>=50?'disabled':''}>+</button></div></div><div class="rw"><span>Лифт</span><div class="lift-options" role="group" aria-label="Лифт: ${title}">${[[true,'Есть'],[false,'Нет']].map(([value,label])=>`<button data-a="lift-choice" data-k="${l}" data-v="${value}" aria-pressed="${value===w[l]||value===null&&w[l]===undefined}">${label}</button>`).join('')}</div></div>${liftDetails(prefix)}</div>`;
 }
 
 function wizard(){
@@ -386,7 +393,7 @@ function wizard(){
  <div class="sec"><b>Ваша задача</b><button class="review-edit" data-a="edit" data-v="0">Изменить</button></div>${ticket(w)}
  <p class="error" role="alert">${esc(S.submitError)}</p>${API_BASE?'':'<p class="fine">Демо-режим: отправка ещё не подключена.</p>'}`;
 }
-function ticket(w){const s=sv(w.sv);const rows=[['Услуга',s.n],['Задача',w.desc||'Без описания'],...((w.photos?.length||w.photoCount)?[['Фото',String(w.photos?.length||w.photoCount)+' шт.']]:[]),['Адрес',w.addr],['Условия',isRemoval(w.sv)?w.location==='outside'?'Уже на улице':w.location==='indoor'?'Из помещения · '+floorText(w.floor,w.lift):'Место не уточнено':floorText(w.floor,w.lift)],...(s.mv?[['Куда',w.to],['На выгрузке',floorText(w.toFloor,w.toLift)]]:[]),...(w.dis?[['Разборка','Нужна']]:[]),['Когда',fd(w.date)+(w.date?', '+(w.slot?SLOTS[w.slot][0].toLowerCase():'любое время'):'')]];return `<div class="ticket">${rows.map(([a,b])=>`<div class="r"><span>${a}</span><b>${esc(b)}</b></div>`).join('')}<div class="r tot"><span>${w.quote?'Предложение':'Стоимость'}</span><b style="font-size:16px">${w.quote?quoteMoney(w.quote.amountMinor):'После оценки'}</b></div></div>`}
+function ticket(w){const s=sv(w.sv);const rows=[['Услуга',s.n],['Задача',w.desc||'Без описания'],...((w.photos?.length||w.photoCount)?[['Фото',String(w.photos?.length||w.photoCount)+' шт.']]:[]),['Адрес',w.addr],['Условия',isRemoval(w.sv)?w.location==='outside'?'Уже на улице':w.location==='indoor'?'Из помещения · '+floorText(w.floor,w.lift,w.liftType,w.liftFirstFloor):'Место не уточнено':floorText(w.floor,w.lift,w.liftType,w.liftFirstFloor)],...(s.mv?[['Куда',w.to],['На выгрузке',floorText(w.toFloor,w.toLift,w.toLiftType,w.toLiftFirstFloor)]]:[]),...(w.dis?[['Разборка','Нужна']]:[]),['Когда',fd(w.date)+(w.date?', '+(w.slot?SLOTS[w.slot][0].toLowerCase():'любое время'):'')]];return `<div class="ticket">${rows.map(([a,b])=>`<div class="r"><span>${a}</span><b>${esc(b)}</b></div>`).join('')}<div class="r tot"><span>${w.quote?'Предложение':'Стоимость'}</span><b style="font-size:16px">${w.quote?quoteMoney(w.quote.amountMinor):'После оценки'}</b></div></div>`}
 const ORDER_STATES={
  received:{title:'Заявка на оценку получена',short:'Получена',text:'Оценим задачу и предложим стоимость. Заказ пока не подтверждён.'},
  processing:{title:'На оценке',text:'Менеджер изучает задачу. Здесь появятся цена и условия.'},
@@ -634,7 +641,7 @@ async function submitOrder(){
  S.sending=true;S.submitError='';render();
  try{
   const form=new FormData();form.set('requestId',w.submitId);form.set('initData',tg.initData);
-  const payload={};for(const key of ['sv','desc','addr','to','floor','toFloor','lift','toLift','location','dis','date','slot','name','phone'])payload[key]=w[key];
+  const payload={};for(const key of ['sv','desc','addr','to','floor','toFloor','lift','toLift','liftType','toLiftType','liftFirstFloor','toLiftFirstFloor','location','dis','date','slot','name','phone'])payload[key]=w[key];
   form.set('order',JSON.stringify(payload));
   for(const [i,p] of (w.photos||[]).entries())form.append('photos',p.blob,`photo-${i+1}.jpg`);
   const response=await fetch(API_BASE+'/api/orders',{method:'POST',body:form,signal:AbortSignal.timeout(90000)});
@@ -739,8 +746,10 @@ document.addEventListener('click',e=>{const b=e.target.closest('[data-a]');if(!b
  if(a==='close')return close();
  if(a==='mo'){const d=new Date(S.cal.y,S.cal.m + +v,1);S.cal={y:d.getFullYear(),m:d.getMonth()};$('#sheet').innerHTML=sheetHTML()+sheetCloseButton();return}
  if(!w)return;
- if(a==='pickup-place'){w.location=v;if(v==='outside'){w.floor=null;w.lift=null}storeDraft();return keep(()=>{})}
- if(a==='lift-choice'){const selected=v==='true';w[k]=w[k]===selected?null:selected;storeDraft();return keep(()=>{})}
+ if(a==='pickup-place'){w.location=v;if(v==='outside'){w.floor=null;w.lift=null;w.liftType=null;w.liftFirstFloor=null}storeDraft();return keep(()=>{})}
+ if(a==='lift-landing'){const selected=v==='true';w[k]=w[k]===selected?null:selected;storeDraft();return keep(()=>{})}
+ if(a==='lift-detail'){w[k]=w[k]===v?null:v;storeDraft();return keep(()=>{})}
+ if(a==='lift-choice'){const selected=v==='true';w[k]=w[k]===selected?null:selected;if(w[k]!==true){w[k==='toLift'?'toLiftType':'liftType']=null;w[k==='toLift'?'toLiftFirstFloor':'liftFirstFloor']=null}storeDraft();return keep(()=>{})}
  if(a==='pick'){w.sv=v;if(!isRemoval(v))w.location=null;S.errors={};close();return keep(()=>{})}
  if(a==='pickd'){w.date=v;close();return keep(()=>{})}
  keep(()=>{if(a==='slot')w.slot=+v;if(a==='tgl')w[k]=!w[k];if(a==='fl')w[k]=+v<0&&w[k]===1?null:Math.min(50,Math.max(1,(Number.isInteger(w[k])?w[k]:0) + +v));if(a==='day'){w.date=v;if(!v)w.slot=0}})

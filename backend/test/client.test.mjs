@@ -221,3 +221,27 @@ test('quote question is a secondary action without the price-objection prompt',(
  const c=client();c.context.proposal={quote:{amountMinor:15000},businessStatus:'quoted'};
  const html=c.run('quoteCard(proposal)');assert.match(html,/class="quote-question"/);assert.match(html,/Задать вопрос/);assert(!html.includes('Если цена или условия не подходят'));
 });
+
+test('paused services are hidden in both choosers while historical labels remain available',()=>{
+ const c=client();const home=c.run('home()');
+ for(const id of ['flat','office','load','rig'])assert(!home.includes('data-v="'+id+'"'));
+ c.run("S.w=newW('furniture');S.sheet='svc'");const picker=c.run('sheetHTML()');
+ for(const id of ['flat','office','load','rig'])assert(!picker.includes('data-v="'+id+'"'));
+ assert.equal(c.run("sv('flat').n"),'Квартирный переезд');
+});
+test('lift type is shown only when a lift is confirmed and appears in the summary',()=>{
+ const c=client();c.run("S.w=newW('furniture');S.w.location='indoor';S.step=1;render()");
+ assert(!c.node('#view').innerHTML.includes('Тип лифта'));
+ c.run("S.w.lift=true;render()");assert.match(c.node('#view').innerHTML,/Обычный/);assert.match(c.node('#view').innerHTML,/Грузовой/);
+ c.run("S.w.liftType='cargo'");assert.match(c.run('ticket(S.w)'),/грузовой лифт/);
+ c.run("S.w.lift=false;render()");assert(!c.node('#view').innerHTML.includes('Тип лифта'));assert(!c.run('ticket(S.w)').includes('грузовой лифт'));
+});
+
+test('lift landing question has no default and the answer appears in the request summary',()=>{
+ const c=client();c.run("S.w=newW('furniture');S.w.location='indoor';S.w.lift=true;S.step=1;render()");
+ assert.equal(c.run('S.w.liftFirstFloor'),null);assert.match(c.node('#view').innerHTML,/Лифт спускается на 1-й этаж/);
+ assert.match(c.node('#view').innerHTML,/Нет, только до 2-го/);
+ assert(!/data-a="lift-landing"[^>]+aria-pressed="true"/.test(c.node('#view').innerHTML));
+ c.run("S.w.liftType='cargo';S.w.liftFirstFloor=false");assert.match(c.run('ticket(S.w)'),/грузовой лифт, только до 2-го этажа/);
+ c.run('S.w.lift=false;render()');assert(!c.node('#view').innerHTML.includes('Лифт спускается'));assert(!c.run('ticket(S.w)').includes('до 2-го'));
+});
