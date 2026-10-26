@@ -474,14 +474,19 @@ function orderActionsSheet(){
  const busy=S.organizing?'disabled':'';
  if(S.sheet==='order-confirm'){
   const deleting=S.orderConfirmAction==='delete';
-  if(deleting&&o.status==='draft')return `<div class="grab"></div><h3>Удалить черновик?</h3><p class="hint">Можно будет заполнить новую заявку.</p><p class="error" role="alert">${esc(S.organizeError)}</p><div class="draft-confirm-actions"><button class="sheet-action" data-a="close" ${busy}>Оставить</button><button class="sheet-action danger" data-a="order-organize" data-v="delete" ${busy}>${S.organizing?'Подождите…':'Удалить'}</button></div>`;
-  return `<div class="grab"></div><h3>${deleting?'Удалить из списка?':'Отменить оценку?'}</h3><p class="hint">${deleting?(o.serverId?'Заявка исчезнет из вашего списка, но останется у менеджера. Это не отменяет оценку.':'Черновик будет удалён с этого устройства.'):'Менеджер получит уведомление. Заявка появится в истории.'}</p><p class="error" role="alert">${esc(S.organizeError)}</p><button class="sheet-action danger" data-a="order-organize" data-v="${S.orderConfirmAction}" ${busy}>${S.organizing?'Подождите…':deleting?'Удалить из списка':'Отменить оценку'}</button>`;
+  if(deleting){
+   const draft=o.status==='draft',active=visibilityOf(o)==='active';
+   const title=draft?'Удалить черновик?':'Убрать заявку из списка?';
+   const description=draft?'Можно будет заполнить новую заявку.':active?'Заявка останется у менеджера. Это не отменит оценку.':'Заявка исчезнет из вашей истории.';
+   return `<div class="grab"></div><h3>${title}</h3><p class="hint">${description}</p><p class="error" role="alert">${esc(S.organizeError)}</p><div class="draft-confirm-actions"><button class="sheet-action" data-a="close" ${busy}>Оставить</button><button class="sheet-action danger" data-a="order-organize" data-v="delete" ${busy}>${S.organizing?'Подождите…':draft?'Удалить':'Убрать'}</button></div>`;
+  }
+  return `<div class="grab"></div><h3>Отменить оценку?</h3><p class="hint">Менеджер получит уведомление. Заявка появится в истории.</p><p class="error" role="alert">${esc(S.organizeError)}</p><button class="sheet-action danger" data-a="order-organize" data-v="cancel" ${busy}>${S.organizing?'Подождите…':'Отменить оценку'}</button>`;
  }
- return `<div class="grab"></div><h3>Заявка № ${esc((o.serverId||o.id).slice(-12))}</h3>${o.serverId&&['received','processing','quoted','discussion','accepted'].includes(o.businessStatus||'received')?`<button class="sheet-action" data-a="order-confirm" data-v="cancel" ${busy}>Отменить оценку</button>`:''}<button class="sheet-action danger" data-a="order-confirm" data-v="delete" ${busy}>Удалить из списка</button><p class="error" role="alert">${esc(S.organizeError)}</p>`;
+ return `<div class="grab"></div><h3>Заявка № ${esc((o.serverId||o.id).slice(-12))}</h3>${o.serverId&&['received','processing','quoted','discussion','accepted'].includes(o.businessStatus||'received')?`<button class="sheet-action" data-a="order-confirm" data-v="cancel" ${busy}>Отменить оценку</button>`:''}<button class="sheet-action danger" data-a="order-confirm" data-v="delete" ${busy}>Убрать из списка</button><p class="error" role="alert">${esc(S.organizeError)}</p>`;
 }
 function sheetCloseButton(){
- const draft=S.sheet==='order-confirm'&&S.orderConfirmAction==='delete'&&S.orders.some(o=>o.id===S.orderMenuId&&o.status==='draft');
- if(draft)return '';
+ const deletion=S.sheet==='order-confirm'&&S.orderConfirmAction==='delete'&&S.orders.some(o=>o.id===S.orderMenuId);
+ if(deletion)return '';
  return `<button class="btn2" data-a="close">Закрыть</button>`;
 }
 function updateOrderSheet(){const sheet=$('#sheet');sheet.innerHTML=orderActionsSheet()+sheetCloseButton();sheet.querySelector('button:not(:disabled)')?.focus({preventScroll:true})}
@@ -507,8 +512,8 @@ async function organizeOrder(action){
   if(S.last?.id===o.id){S.last=action==='delete'?null:updated;S.tab='orders';S.discussing=false}
   save();close();render(true);
   const draftDeleted=action==='delete'&&o.status==='draft';
-  if(draftDeleted)photoCache.delete(o.id);
-  showOrderNotice(draftDeleted?'Черновик удалён':{archive:'Заявка в архиве',restore:'Заявка в активных',delete:'Заявка удалена из списка',cancel:'Оценка отменена'}[action],action==='cancel'||draftDeleted?null:{order:o,previous});
+  if(action==='delete')photoCache.delete(o.id);
+  showOrderNotice(draftDeleted?'Черновик удалён':{archive:'Заявка в архиве',restore:'Заявка в активных',delete:'Заявка убрана из списка',cancel:'Оценка отменена'}[action],action==='cancel'||action==='delete'?null:{order:o,previous});
  }catch(e){S.organizeError=e.name==='TypeError'||e.name==='TimeoutError'?'Не удалось подтвердить действие. Попробуйте повторно.':e.message}
  finally{S.organizing=false;if(S.sheet==='order-actions'||S.sheet==='order-confirm')updateOrderSheet()}
 }

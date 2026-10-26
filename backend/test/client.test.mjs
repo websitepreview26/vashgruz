@@ -145,7 +145,8 @@ test('server deletion is retained across subsequent status refresh',async()=>{
  const remote={id:'local',serverId:'VG-TEST',status:'sent',sv:'trash',date:'',desc:'Диван',businessStatus:'received',statusVersion:0};
  const c=client({live:true,fetcher:async(url)=>url.endsWith('/organize')?Response.json({ok:true,order:{...remote,customerVisibility:'deleted'}}):Response.json({ok:true,orders:[]})});
  c.context.record=remote;c.run("S.orders=[record];S.orderMenuId='local';S.tab='orders';S.sheet='order-confirm';S.orderConfirmAction='delete'");
- await c.run("organizeOrder('delete')");assert.equal(c.run('S.orders.length'),0);await c.run('syncOrders()');assert.equal(c.run('S.orders.length'),0);
+ const dialog=c.run('orderActionsSheet()+sheetCloseButton()');assert.match(dialog,/Убрать заявку из списка\?/);assert.match(dialog,/Это не отменит оценку/);assert.match(dialog,/>Оставить</);assert.match(dialog,/>Убрать</);assert(!dialog.includes('>Закрыть<'));
+ await c.run("organizeOrder('delete')");assert.equal(c.run('orderUndo'),null);assert.equal(c.run('S.orders.length'),0);await c.run('syncOrders()');assert.equal(c.run('S.orders.length'),0);
 });
 
 test('Telegram native callback fills phone immediately without waiting for webhook',async()=>{
@@ -203,8 +204,8 @@ test('only closed statuses create history; accepted offers and old manually arch
 });
 test('order menu contains deletion and current assessment cancellation without repeat or archive actions',()=>{
  const c=client();c.run("S.orders=[{id:'lead',serverId:'VG-LEAD',status:'sent',sv:'trash',businessStatus:'processing'}];S.orderMenuId='lead';S.sheet='order-actions'");
- let menu=c.run('orderActionsSheet()');assert.match(menu,/Удалить из списка/);assert.match(menu,/Отменить оценку/);assert(!menu.includes('data-a="again"'));assert(!menu.includes('data-v="archive"'));assert(!menu.includes('data-v="restore"'));
- c.run("S.orders[0].businessStatus='cancelled'");menu=c.run('orderActionsSheet()');assert.match(menu,/Удалить из списка/);assert(!menu.includes('Отменить оценку'));
+ let menu=c.run('orderActionsSheet()');assert.match(menu,/Убрать из списка/);assert.match(menu,/Отменить оценку/);assert(!menu.includes('data-a="again"'));assert(!menu.includes('data-v="archive"'));assert(!menu.includes('data-v="restore"'));
+ c.run("S.orders[0].businessStatus='cancelled'");menu=c.run('orderActionsSheet()');assert.match(menu,/Убрать из списка/);assert(!menu.includes('Отменить оценку'));
 });
 
 test('pickup location controls conditions without assuming floor or lift and copy describes assessment',()=>{
