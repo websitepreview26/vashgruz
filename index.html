@@ -221,7 +221,7 @@ body{background:var(--bg)}.app-toolbar{display:flex;align-items:center;justify-c
 .selected-service em{position:relative;z-index:1;flex:none;font-size:14px;color:var(--mut)}
 .input-card textarea{min-height:0;overflow-y:hidden;resize:none}
 .address-group{margin-bottom:14px;padding:14px;background:var(--card);border:1px solid var(--line);border-radius:19px}
-.address-group .field-label{margin-top:0}.address-group .fld{background:var(--bg);margin-bottom:4px}
+.address-group .field-label{margin:0 0 4px}.address-group .fld{padding:0;height:48px;border:0;border-bottom:1px solid var(--line);border-radius:0;background:transparent;margin-bottom:10px;box-shadow:none}.address-group .fld input{font-size:16px}.address-group .fld:focus-within{border-bottom-color:var(--acc);box-shadow:0 1px 0 var(--acc)}.address-group .fld.invalid{border-bottom-color:#c74731}
 .address-group .conditions{padding:0;background:transparent;border:0;box-shadow:none}
 .address-group>.error:empty{display:none}
 .day-unsure{width:auto;min-width:116px;padding:10px 14px;display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:500;white-space:nowrap}
@@ -229,9 +229,9 @@ body{background:var(--bg)}.app-toolbar{display:flex;align-items:center;justify-c
 .pickup-place{display:flex;gap:8px;margin:12px 0 4px}.pickup-place button,.lift-options button{border:1px solid var(--line);border-radius:10px;padding:10px;background:var(--bg);font-size:13px;color:var(--mut)}.pickup-place button{flex:1}.pickup-place button[aria-pressed=true],.lift-options button[aria-pressed=true]{border-color:var(--acc);background:color-mix(in srgb,var(--acc) 12%,var(--card));color:var(--ink)}
 .lift-options{display:flex;gap:4px}.lift-options button{padding:8px;font-size:12px}.condition-optional{display:block;font-size:10px;color:var(--mut);font-weight:400}
 .quote-question{display:block;margin-top:16px;padding:8px 0;font-size:14px;color:var(--mut);text-decoration:underline;text-underline-offset:3px}
-.home-original .draft-resume{margin:18px 0 24px;gap:0;background:color-mix(in srgb,var(--acc) 9%,var(--card));border:1px solid color-mix(in srgb,var(--acc) 42%,var(--line));border-radius:18px;overflow:hidden}
+.home-original .draft-resume{margin:18px 0 24px;gap:0;background:color-mix(in srgb,var(--acc) 4%,var(--card));border:1px solid color-mix(in srgb,var(--acc) 18%,var(--line));border-radius:18px;overflow:hidden}
 .home-original .resume{margin:0;background:transparent;color:var(--ink);border:0;border-radius:0;padding:14px;box-shadow:none}
-.home-original .resume small{color:var(--mut)}.home-original .resume>svg{color:var(--mut)!important}.home-original .resume>svg:first-child{color:#c78b00!important}
+.home-original .resume small{color:var(--mut)}.home-original .resume>svg{color:var(--mut)!important}.home-original .resume>svg:first-child{color:#ae944e!important}
 .home-original .draft-delete{flex-basis:44px;align-self:stretch;margin:10px 0;border:0;border-left:1px solid var(--line);border-radius:0;background:transparent}
 .home-original .draft-delete svg{width:19px;height:19px}
 .draft-confirm-actions{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin-top:20px}.draft-confirm-actions .sheet-action{margin:0;min-height:52px;padding:14px 8px;text-align:center;font-weight:600}
@@ -356,7 +356,7 @@ function home(){
  <div class="grid">${SV.filter(s=>!s.hidden).map(s=>`<button class="svc" style="--c:${s.c}" data-a="start" data-v="${s.id}"><span class="bg">${ic(s.id)}</span><b>${s.n}</b><small>${s.r?'от '+s.r+' BYN':'по оценке'}</small></button>`).join('')}</div></section>`;
 }
 const error = key => `<p class="error" id="err-${key}" role="alert">${esc(S.errors[key]||'')}</p>`;
-const addressField=(key,label,placeholder)=>`<label class="field-label" for="${key}">${label}</label><div class="fld ${S.errors[key]?'invalid':''}">${ic('pin')}<input id="${key}" data-f="${key}" maxlength="220" autocomplete="street-address" aria-describedby="err-${key}" aria-invalid="${!!S.errors[key]}" enterkeyhint="${key==='addr'&&sv(S.w.sv).mv?'next':'done'}" placeholder="${placeholder}" value="${esc(S.w[key])}"></div>${error(key)}`;
+const addressField=(key,label,placeholder)=>`<label class="field-label" for="${key}">${label}</label><div class="fld ${S.errors[key]?'invalid':''}"><input id="${key}" data-f="${key}" maxlength="220" autocomplete="street-address" aria-describedby="err-${key}" aria-invalid="${!!S.errors[key]}" enterkeyhint="${key==='addr'&&sv(S.w.sv).mv?'next':'done'}" placeholder="${placeholder}" value="${esc(S.w[key])}"></div>${error(key)}`;
 const isRemoval=id=>['furniture','construction','trash'].includes(id);
 function floorText(f,l){return (Number.isInteger(f)?f+' этаж':'Этаж не указан')+', '+(l===true?'есть лифт':l===false?'без лифта':'лифт не указан')}
 function conditions(prefix,title,showTitle=true){
@@ -364,7 +364,7 @@ function conditions(prefix,title,showTitle=true){
  const place=!prefix&&isRemoval(w.sv);
  const where=place?`<div class="pickup-place" role="group" aria-label="Откуда забирать"><button data-a="pickup-place" data-v="indoor" aria-pressed="${w.location==='indoor'}">Из помещения</button><button data-a="pickup-place" data-v="outside" aria-pressed="${w.location==='outside'}">Уже на улице</button></div>`:'';
  if(place&&w.location!=='indoor')return where;
- return `${showTitle?`<p class="conditions-title">${title}</p>`:''}${where}<div class="card conditions"><div class="rw"><span>Этаж <small class="condition-optional">необязательно</small></span><div class="stp"><button data-a="fl" data-k="${f}" data-v="-1" aria-label="Уменьшить этаж" ${!Number.isInteger(w[f])?'disabled':''}>−</button><b>${Number.isInteger(w[f])?w[f]:'—'}</b><button data-a="fl" data-k="${f}" data-v="1" aria-label="Увеличить этаж" ${w[f]>=50?'disabled':''}>+</button></div></div><div class="rw"><span>Лифт</span><div class="lift-options" role="group" aria-label="Лифт: ${title}">${[[true,'Есть'],[false,'Нет'],[null,'Не знаю']].map(([value,label])=>`<button data-a="lift-choice" data-k="${l}" data-v="${value}" aria-pressed="${value===w[l]||value===null&&w[l]===undefined}">${label}</button>`).join('')}</div></div></div>`;
+ return `${showTitle?`<p class="conditions-title">${title}</p>`:''}${where}<div class="card conditions"><div class="rw"><span>Этаж <small class="condition-optional">необязательно</small></span><div class="stp"><button data-a="fl" data-k="${f}" data-v="-1" aria-label="Уменьшить этаж" ${!Number.isInteger(w[f])?'disabled':''}>−</button><b>${Number.isInteger(w[f])?w[f]:'—'}</b><button data-a="fl" data-k="${f}" data-v="1" aria-label="Увеличить этаж" ${w[f]>=50?'disabled':''}>+</button></div></div><div class="rw"><span>Лифт</span><div class="lift-options" role="group" aria-label="Лифт: ${title}">${[[true,'Есть'],[false,'Нет']].map(([value,label])=>`<button data-a="lift-choice" data-k="${l}" data-v="${value}" aria-pressed="${value===w[l]||value===null&&w[l]===undefined}">${label}</button>`).join('')}</div></div></div>`;
 }
 
 function wizard(){
@@ -375,8 +375,8 @@ function wizard(){
  <label class="field-label" for="desc">Описание <span style="font-weight:400;color:var(--mut)">· необязательно</span></label><div class="card input-card"><textarea rows="1" id="desc" class="task-input" data-f="desc" maxlength="1000" aria-describedby="err-desc" aria-invalid="${!!S.errors.desc}" placeholder="${s.ph}">${esc(w.desc)}</textarea></div>${error('desc')}
  <div class="sec"><b>Фото</b><small role="status">${(w.photos||[]).length?'Добавлено: '+w.photos.length+' из 5':'необязательно · до 5'}</small></div><p class="hint">Помогут точнее оценить стоимость.</p><p class="error" id="photo-error" role="alert">${esc(S.photoError)}</p><div class="photo-grid">${(w.photos||[]).map((p,i)=>`<div class="photo-item"><img src="${p.url}" alt="Фото ${i+1}"><button data-a="remove-photo" data-v="${i}" aria-label="Удалить фото ${i+1}">${ic('x')}</button></div>`).join('')}${(w.photos||[]).length<5?`<label class="photo-add" for="photo-input" role="button" tabindex="0" aria-disabled="${S.preparing}">${ic('cam')}<span>${S.preparing?'Подготовка…':'Добавить'}</span></label>`:''}</div>`;
  if(S.step===1)return bar+`<div class="hd"><h1>${s.mv?'Откуда и куда?':'Куда приехать?'}</h1><p class="sub">Адрес и удобное время.</p></div>
- <section class="address-group" aria-label="${s.mv?'Точка А':'Место работы'}">${addressField('addr',s.mv?'Точка А — откуда забрать':'Адрес','Улица, дом, населённый пункт')}${conditions('',s.mv?'В точке А':'Условия на месте',false)}</section>
- ${s.mv?`<section class="address-group" aria-label="Точка Б">${addressField('to','Точка Б — куда привезти','Улица, дом, населённый пункт')}${conditions('to','В точке Б',false)}</section>`:''}
+ <section class="address-group" aria-label="${s.mv?'Точка А':'Место работы'}">${addressField('addr',s.mv?'Точка А — откуда забрать':'Адрес','Улица, дом, город')}${conditions('',s.mv?'В точке А':'Условия на месте',false)}</section>
+ ${s.mv?`<section class="address-group" aria-label="Точка Б">${addressField('to','Точка Б — куда привезти','Улица, дом, город')}${conditions('to','В точке Б',false)}</section>`:''}
  <div class="sec"><b>Когда удобно?</b><small>Можно уточнить позже</small></div>${error('date')}
  <div class="days"><button class="day day-unsure" data-a="day" data-v="" aria-pressed="${!w.date}">Пока не знаю</button>${Array.from({length:5},(_,i)=>plus(i)).map((d,i)=>`<button class="day" data-a="day" data-v="${iso(d)}" aria-pressed="${iso(d)===w.date}"><small>${i===0?'Сегодня':i===1?'Завтра':d.toLocaleDateString('ru-RU',{weekday:'short'})}</small><b>${d.getDate()}</b></button>`).join('')}</div>
  <button class="fld" data-a="sheet" data-v="cal">${ic('cal')}<span class="v">${w.date?esc(fd(w.date)):'Выбрать другую дату'}</span>${ic('chev')}</button>
@@ -735,7 +735,7 @@ document.addEventListener('click',e=>{const b=e.target.closest('[data-a]');if(!b
  if(a==='mo'){const d=new Date(S.cal.y,S.cal.m + +v,1);S.cal={y:d.getFullYear(),m:d.getMonth()};$('#sheet').innerHTML=sheetHTML()+sheetCloseButton();return}
  if(!w)return;
  if(a==='pickup-place'){w.location=v;if(v==='outside'){w.floor=null;w.lift=null}storeDraft();return keep(()=>{})}
- if(a==='lift-choice'){w[k]=v==='null'?null:v==='true';storeDraft();return keep(()=>{})}
+ if(a==='lift-choice'){const selected=v==='true';w[k]=w[k]===selected?null:selected;storeDraft();return keep(()=>{})}
  if(a==='pick'){w.sv=v;if(!isRemoval(v))w.location=null;S.errors={};close();return keep(()=>{})}
  if(a==='pickd'){w.date=v;close();return keep(()=>{})}
  keep(()=>{if(a==='slot')w.slot=+v;if(a==='tgl')w[k]=!w[k];if(a==='fl')w[k]=+v<0&&w[k]===1?null:Math.min(50,Math.max(1,(Number.isInteger(w[k])?w[k]:0) + +v));if(a==='day'){w.date=v;if(!v)w.slot=0}})

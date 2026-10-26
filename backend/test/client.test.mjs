@@ -211,7 +211,7 @@ test('pickup location controls conditions without assuming floor or lift and cop
  const c=client();c.run("S.w=newW('furniture');S.step=1;render()");
  assert.equal(c.run('S.w.floor'),null);assert.equal(c.run('S.w.lift'),null);assert.equal(c.run('S.w.location'),null);
  let html=c.node('#view').innerHTML;assert.match(html,/Из помещения/);assert.match(html,/Уже на улице/);assert(!html.includes('data-k="floor"'));
- c.run("S.w.location='indoor';render()");html=c.node('#view').innerHTML;assert.match(html,/data-k="floor"/);assert.match(html,/>—<\/b>/);assert.match(html,/data-v="null" aria-pressed="true"/);
+ c.run("S.w.location='indoor';render()");html=c.node('#view').innerHTML;assert.match(html,/data-k="floor"/);assert.match(html,/>—<\/b>/);assert(!html.includes('data-a="lift-choice" data-k="lift" data-v="true" aria-pressed="true"'));assert(!html.includes('data-a="lift-choice" data-k="lift" data-v="false" aria-pressed="true"'));assert(!html.includes('Не знаю'));
  c.run("S.w.location='outside';S.w.floor=4;S.w.lift=true;render()");assert(!c.node('#view').innerHTML.includes('data-k="floor"'));assert.match(c.run('ticket(S.w)'),/Уже на улице/);assert(!c.run('ticket(S.w)').includes('4 этаж'));
  c.run("S.step=0;render()");html=c.node('#view').innerHTML;assert.match(html,/Описание/);assert.match(html,/Помогут точнее оценить стоимость/);assert(!html.includes('Коротко:'));
  c.run("S.step=2;render()");assert.match(c.node('#view').innerHTML,/Куда сообщить стоимость/);assert.match(c.node('#view').innerHTML,/Предложение появится здесь/);
