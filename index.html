@@ -208,15 +208,16 @@ body{background:var(--bg)}.app-toolbar{display:flex;align-items:center;justify-c
 .sheet-action{width:100%;text-align:left;padding:16px;border-radius:14px;background:var(--card);margin-top:8px;font-size:15px}.sheet-action:disabled{opacity:.6}.sheet-action.danger{color:#d66358}.order-notice{position:absolute;z-index:12;left:16px;right:16px;bottom:calc(85px + var(--app-safe-bottom) + var(--app-content-bottom));padding:15px 16px;border-radius:14px;background:var(--navy);color:#fff;box-shadow:0 5px 25px #0002;display:flex;align-items:center;justify-content:space-between;gap:12px;font-size:13px}.order-notice button{color:var(--acc);font-weight:600;font-size:13px}
 .draft-resume{display:flex;gap:8px;align-items:stretch;margin:0 0 18px}.draft-resume .resume{flex:1;min-width:0;margin:0}.draft-delete{flex:0 0 48px;display:grid;place-items:center;border-radius:17px;background:var(--card);color:var(--mut);border:1px solid var(--line)}.draft-delete svg{width:21px;height:21px}
 
-/* Local variation: horizontal service cards with the original background artwork. */
-.home-original .grid{grid-template-columns:1fr;gap:10px}
-.home-original .svc,.selected-service{min-height:84px;padding:18px;flex-direction:row;align-items:center;justify-content:space-between;gap:16px;border-radius:19px}
-.home-original .svc b,.selected-service b{position:relative;z-index:1;max-width:62%;font-size:16px;line-height:1.2}
-.home-original .svc small{position:relative;z-index:1;flex:none;margin:0;font-size:14px;white-space:nowrap;color:var(--ink);font-weight:500}
-.home-original .svc .bg,.selected-service .bg{top:-18px;right:48px;opacity:.07}
-.home-original .svc .bg svg,.selected-service .bg svg{width:120px;height:120px}
-@media(max-width:350px){.home-original .svc{padding:16px 14px;gap:12px}.home-original .svc b{font-size:15px}.home-original .svc small{font-size:13px}}
-
+/* Two-column service cards; selected service keeps a horizontal layout. */
+.home-original .grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
+.home-original .svc{--c:#72899b!important;min-height:142px;padding:16px;border-radius:22px;gap:3px}
+.home-original .svc b{margin-top:auto;position:relative;z-index:1;display:block;min-height:3.45em;font-size:16px;line-height:1.15}
+.home-original .svc small{position:relative;z-index:1;margin-top:3px;font-size:14px}
+.home-original .svc .bg{top:-14px;right:-18px;opacity:.1}.home-original .svc .bg svg{width:104px;height:104px}
+.selected-service{--c:#72899b!important;min-height:84px;padding:18px;flex-direction:row;align-items:center;justify-content:space-between;gap:16px;border-radius:19px}
+.selected-service b{position:relative;z-index:1;max-width:62%;font-size:16px;line-height:1.2}
+.selected-service .bg{top:-18px;right:48px;opacity:.07}.selected-service .bg svg{width:120px;height:120px}
+@media(max-height:740px){.home-original .svc{min-height:132px;padding:14px}}
 .selected-service em{position:relative;z-index:1;flex:none;font-size:14px;color:var(--mut)}
 .input-card textarea{min-height:0;overflow-y:hidden;resize:none}
 .address-group{margin-bottom:14px;padding:14px;background:var(--card);border:1px solid var(--line);border-radius:19px}
@@ -228,6 +229,12 @@ body{background:var(--bg)}.app-toolbar{display:flex;align-items:center;justify-c
 .pickup-place{display:flex;gap:8px;margin:12px 0 4px}.pickup-place button,.lift-options button{border:1px solid var(--line);border-radius:10px;padding:10px;background:var(--bg);font-size:13px;color:var(--mut)}.pickup-place button{flex:1}.pickup-place button[aria-pressed=true],.lift-options button[aria-pressed=true]{border-color:var(--acc);background:color-mix(in srgb,var(--acc) 12%,var(--card));color:var(--ink)}
 .lift-options{display:flex;gap:4px}.lift-options button{padding:8px;font-size:12px}.condition-optional{display:block;font-size:10px;color:var(--mut);font-weight:400}
 .quote-question{display:block;margin-top:16px;padding:8px 0;font-size:14px;color:var(--mut);text-decoration:underline;text-underline-offset:3px}
+.home-original .draft-resume{margin:18px 0 24px;gap:0;background:color-mix(in srgb,var(--acc) 9%,var(--card));border:1px solid color-mix(in srgb,var(--acc) 42%,var(--line));border-radius:18px;overflow:hidden}
+.home-original .resume{margin:0;background:transparent;color:var(--ink);border:0;border-radius:0;padding:14px;box-shadow:none}
+.home-original .resume small{color:var(--mut)}.home-original .resume>svg{color:var(--mut)!important}.home-original .resume>svg:first-child{color:#c78b00!important}
+.home-original .draft-delete{flex-basis:44px;align-self:stretch;margin:10px 0;border:0;border-left:1px solid var(--line);border-radius:0;background:transparent}
+.home-original .draft-delete svg{width:19px;height:19px}
+.draft-confirm-actions{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin-top:20px}.draft-confirm-actions .sheet-action{margin:0;min-height:52px;padding:14px 8px;text-align:center;font-weight:600}
 </style>
 </head>
 <body>
@@ -467,11 +474,17 @@ function orderActionsSheet(){
  const busy=S.organizing?'disabled':'';
  if(S.sheet==='order-confirm'){
   const deleting=S.orderConfirmAction==='delete';
+  if(deleting&&o.status==='draft')return `<div class="grab"></div><h3>Удалить черновик?</h3><p class="hint">Можно будет заполнить новую заявку.</p><p class="error" role="alert">${esc(S.organizeError)}</p><div class="draft-confirm-actions"><button class="sheet-action" data-a="close" ${busy}>Оставить</button><button class="sheet-action danger" data-a="order-organize" data-v="delete" ${busy}>${S.organizing?'Подождите…':'Удалить'}</button></div>`;
   return `<div class="grab"></div><h3>${deleting?'Удалить из списка?':'Отменить оценку?'}</h3><p class="hint">${deleting?(o.serverId?'Заявка исчезнет из вашего списка, но останется у менеджера. Это не отменяет оценку.':'Черновик будет удалён с этого устройства.'):'Менеджер получит уведомление. Заявка появится в истории.'}</p><p class="error" role="alert">${esc(S.organizeError)}</p><button class="sheet-action danger" data-a="order-organize" data-v="${S.orderConfirmAction}" ${busy}>${S.organizing?'Подождите…':deleting?'Удалить из списка':'Отменить оценку'}</button>`;
  }
  return `<div class="grab"></div><h3>Заявка № ${esc((o.serverId||o.id).slice(-12))}</h3>${o.serverId&&['received','processing','quoted','discussion','accepted'].includes(o.businessStatus||'received')?`<button class="sheet-action" data-a="order-confirm" data-v="cancel" ${busy}>Отменить оценку</button>`:''}<button class="sheet-action danger" data-a="order-confirm" data-v="delete" ${busy}>Удалить из списка</button><p class="error" role="alert">${esc(S.organizeError)}</p>`;
 }
-function updateOrderSheet(){const sheet=$('#sheet');sheet.innerHTML=orderActionsSheet()+'<button class="btn2" data-a="close">Закрыть</button>';sheet.querySelector('button:not(:disabled)')?.focus({preventScroll:true})}
+function sheetCloseButton(){
+ const draft=S.sheet==='order-confirm'&&S.orderConfirmAction==='delete'&&S.orders.some(o=>o.id===S.orderMenuId&&o.status==='draft');
+ if(draft)return '';
+ return `<button class="btn2" data-a="close">Закрыть</button>`;
+}
+function updateOrderSheet(){const sheet=$('#sheet');sheet.innerHTML=orderActionsSheet()+sheetCloseButton();sheet.querySelector('button:not(:disabled)')?.focus({preventScroll:true})}
 let orderUndo=null,noticeTimer=null;
 function showOrderNotice(text,undo=null){
  if(typeof window.clearTimeout==='function')window.clearTimeout(noticeTimer);
@@ -493,7 +506,9 @@ async function organizeOrder(action){
   if(action==='delete')S.orders=S.orders.filter(x=>x.id!==o.id);else S.orders=S.orders.map(x=>x.id===o.id?updated:x);
   if(S.last?.id===o.id){S.last=action==='delete'?null:updated;S.tab='orders';S.discussing=false}
   save();close();render(true);
-  showOrderNotice({archive:'Заявка в архиве',restore:'Заявка в активных',delete:'Заявка удалена из списка',cancel:'Оценка отменена'}[action],action==='cancel'?null:{order:o,previous});
+  const draftDeleted=action==='delete'&&o.status==='draft';
+  if(draftDeleted)photoCache.delete(o.id);
+  showOrderNotice(draftDeleted?'Черновик удалён':{archive:'Заявка в архиве',restore:'Заявка в активных',delete:'Заявка удалена из списка',cancel:'Оценка отменена'}[action],action==='cancel'||draftDeleted?null:{order:o,previous});
  }catch(e){S.organizeError=e.name==='TypeError'||e.name==='TimeoutError'?'Не удалось подтвердить действие. Попробуйте повторно.':e.message}
  finally{S.organizing=false;if(S.sheet==='order-actions'||S.sheet==='order-confirm')updateOrderSheet()}
 }
@@ -521,7 +536,7 @@ function openSheet(k){
  if(k==='cal'){const d=new Date((S.w.date||today())+'T12:00');S.cal={y:d.getFullYear(),m:d.getMonth()}}
  const sheet=$('#sheet'),layer=$('#layer');
  layer.className='';
- sheet.innerHTML=sheetHTML()+'<button class="btn2" data-a="close">Закрыть</button>';
+ sheet.innerHTML=sheetHTML()+sheetCloseButton();
  sheet.setAttribute('aria-label',k.startsWith('order-')?'Действия с заявкой':k==='cal'?'Выбор даты':'Выбор услуги');
  sheet.setAttribute('aria-hidden','false');sheet.inert=false;sheet.scrollTop=0;
  // Commit the off-screen position before starting the entrance transition.
@@ -717,7 +732,7 @@ document.addEventListener('click',e=>{const b=e.target.closest('[data-a]');if(!b
  if(a==='remove-photo'){const p=w.photos.splice(+v,1)[0];if(p?.url.startsWith('blob:'))URL.revokeObjectURL(p.url);storeDraft();return keep(()=>{})}
  if(a==='sheet')return openSheet(v);
  if(a==='close')return close();
- if(a==='mo'){const d=new Date(S.cal.y,S.cal.m + +v,1);S.cal={y:d.getFullYear(),m:d.getMonth()};$('#sheet').innerHTML=sheetHTML()+'<button class="btn2" data-a="close">Закрыть</button>';return}
+ if(a==='mo'){const d=new Date(S.cal.y,S.cal.m + +v,1);S.cal={y:d.getFullYear(),m:d.getMonth()};$('#sheet').innerHTML=sheetHTML()+sheetCloseButton();return}
  if(!w)return;
  if(a==='pickup-place'){w.location=v;if(v==='outside'){w.floor=null;w.lift=null}storeDraft();return keep(()=>{})}
  if(a==='lift-choice'){w[k]=v==='null'?null:v==='true';storeDraft();return keep(()=>{})}

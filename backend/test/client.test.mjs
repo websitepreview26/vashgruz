@@ -136,10 +136,10 @@ test('active and archive tabs filter rows and show only first batch',()=>{
  assert.equal((c.node('#view').innerHTML.match(/<article class="ord">/g)||[]).length,8);assert.match(c.node('#view').innerHTML,/Показать ещё \(3\)/);
  c.run("S.listTab='archive';render()");assert.equal((c.node('#view').innerHTML.match(/<article class="ord">/g)||[]).length,1);assert.match(c.node('#view').innerHTML,/Задача 11/);
 });
-test('local draft deletion and undo work without server request',async()=>{
+test('local draft deletion uses calm confirmation and has no undo action',async()=>{
  const c=client();c.run("S.orders=[{id:'draft',sv:'trash',status:'draft',date:'',desc:'Тест'}];S.orderMenuId='draft';S.tab='orders';S.sheet='order-confirm';S.orderConfirmAction='delete'");
- await c.run("organizeOrder('delete')");assert.equal(c.run('S.orders.length'),0);assert.equal(c.run('S.organizeError'),'');assert.match(c.node('#order-notice').innerHTML,/Отменить/);
- await c.run('undoOrder()');assert.equal(c.run('S.orders.length'),1);assert.equal(c.run('S.orders[0].id'),'draft');
+ const confirmation=c.run('orderActionsSheet()+sheetCloseButton()');assert.match(confirmation,/Удалить черновик\?/);assert.match(confirmation,/Можно будет заполнить новую заявку/);assert.match(confirmation,/>Оставить</);assert(!confirmation.includes('Удалить из списка'));
+ await c.run("organizeOrder('delete')");assert.equal(c.run('S.orders.length'),0);assert.equal(c.run('S.organizeError'),'');assert.match(c.node('#order-notice').innerHTML,/Черновик удалён/);assert(!c.node('#order-notice').innerHTML.includes('undo-order'));assert.equal(c.run('orderUndo'),null);
 });
 test('server deletion is retained across subsequent status refresh',async()=>{
  const remote={id:'local',serverId:'VG-TEST',status:'sent',sv:'trash',date:'',desc:'Диван',businessStatus:'received',statusVersion:0};
