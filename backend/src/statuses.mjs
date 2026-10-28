@@ -1,4 +1,6 @@
 import {createOutbox} from './outbox.mjs';
+import {createBotChatService} from './bot-chat.mjs';
+import {configureBotProfile} from './bot-profile.mjs';
 // Telegram media captions have a 1024-character limit. Keep every line represented;
 // the full original remains in D1 and is available via the manager's details button.
 export function compactCaption(text){
@@ -32,6 +34,7 @@ export function statusKeyboard(row,confirmCancel=false){
 }
 export function createStatusService({telegram,stmt,fail}){
   const outbox=createOutbox({stmt,telegram,edit});
+  const botChat=createBotChatService({telegram,stmt});
   async function smallJson(request){
     const reader=request.body?.getReader();if(!reader)fail(400,'FORMAT','Пустой запрос.');
     const chunks=[];let n=0;
@@ -223,6 +226,7 @@ export function createStatusService({telegram,stmt,fail}){
       }
       return {ok:true};
     }
+    if(message&&await botChat.receive(env,message))return {ok:true};
     if(message?.text){await priceReply(env,message);return {ok:true}}
     if(!q)return {ok:true};
     if(typeof q.id!=='string'||q.id.length>128)return {ok:true};
@@ -274,6 +278,7 @@ export function createStatusService({telegram,stmt,fail}){
     const key=request.headers.get('authorization')?.replace(/^Bearer /,'');
     if(!secretMatches(key,env.ADMIN_SETUP_SECRET))fail(403,'SETUP_AUTH','Доступ запрещён.');
     const body=await smallJson(request);
+    if(body.action==='bot_profile')return configureBotProfile(env,telegram,fail);
     if(body.action==='deliveries'){
       const now=Date.now();
       return {ok:true,orders:(await stmt(env,"SELECT id,state,updated_at,delivery_attempts,message_kind FROM orders WHERE state='uncertain' OR (state IN ('sending_text','sending_photos') AND updated_at<?) OR (state='received' AND delivery_attempts>=5) ORDER BY updated_at LIMIT 100",now-120000).all()).results,
@@ -329,5 +334,5 @@ export function createStatusService({telegram,stmt,fail}){
     const info=await setupTelegram('getWebhookInfo',new FormData());
     return {ok:true,webhook:info.url===url,pending:info.pending_update_count||0};
   }
-  return {ensureMediaButtons,received,list,get,contact,saveContact,decision,organize,webhook,setup,flushOutbox:outbox.flush};
+  return {ensureMediaButtons,received,list,get,contact,saveContact,decision,organize,webhook,setup,flushOutbox:outbox.flush,maintainBotChat:botChat.maintenance};
 }

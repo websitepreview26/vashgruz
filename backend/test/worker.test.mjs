@@ -32,6 +32,7 @@ function env(){
   sqlite.exec(readFileSync(new URL('../migrations/0006_media_cards.sql',import.meta.url),'utf8'));
   sqlite.exec(readFileSync(new URL('../migrations/0007_contact_diagnostics.sql',import.meta.url),'utf8'));
   sqlite.exec(readFileSync(new URL('../migrations/0008_security.sql',import.meta.url),'utf8'));
+  sqlite.exec(readFileSync(new URL('../migrations/0009_bot_chat.sql',import.meta.url),'utf8'));
   return {MINI_APP_URL:'https://websitepreview26.github.io/vashgruz/',BOT_USERNAME:'vash_gruz_test_bot',BOT_TOKEN:TOKEN,TELEGRAM_CHAT_ID:'-100123456789',ALLOWED_ORIGIN:ORIGIN,DB:{
     prepare(sql){return {bind(...args){return {
       sql,args,
@@ -571,4 +572,113 @@ test('security: reconciliation of missing legacy photos preserves the already de
  const calls=telegramMock();assert.equal((await worker.fetch(setupRequest({action:'resolve_order',id:row.id,confirmation:row.id,expectedUpdatedAt:row.updated_at,outcome:'not_delivered',note:'Текст есть, фото не доставлены'}),e)).status,200);
  assert.equal(e.sqlite.prepare('SELECT state FROM orders').get().state,'text_sent');assert.equal(e.sqlite.prepare('SELECT message_id FROM orders').get().message_id,100);
  assert.equal((await worker.fetch(await request({id:requestId,files:[photo()]}),e)).status,200);assert.deepEqual(calls.map(c=>c.method),['sendPhoto']);
+});
+
+function privateMessage(text='/start',{id=200,user=42,chat=user,type='private',extra={},date=Math.floor(Date.now()/1000)}={}){
+ return new Request('https://api.example/telegram/webhook',{method:'POST',headers:{'X-Telegram-Bot-Api-Secret-Token':WEBHOOK_SECRET},body:JSON.stringify({message:{message_id:id,date,from:{id:user,is_bot:false},chat:{id:chat,type},...(text===null?{}:{text}),...extra}})});
+}
+const privateEnv=()=>({...env(),TELEGRAM_WEBHOOK_SECRET:WEBHOOK_SECRET,CLEAN_PRIVATE_MESSAGES:'true'});
+
+test('bot chat: start creates one pinned welcome before deleting the incoming command',async()=>{
+ const e=privateEnv(),calls=telegramMock();assert.equal((await worker.fetch(privateMessage(),e)).status,200);
+ assert.deepEqual(calls.map(c=>c.method),['sendMessage','pinChatMessage','deleteMessage']);
+ const welcome=calls[0].form;assert.match(welcome.get('text'),/ВАШ ГРУЗ/);assert.match(welcome.get('text'),/очищаются автоматически/);assert.equal(welcome.get('chat_id'),'42');assert.equal(welcome.get('parse_mode'),'HTML');
+ assert.equal(JSON.parse(welcome.get('reply_markup')).inline_keyboard[0][0].web_app.url,e.MINI_APP_URL);
+ assert.equal(calls[1].form.get('message_id'),'100');assert.equal(calls[2].form.get('message_id'),'200');
+ assert.equal(e.sqlite.prepare('SELECT pinned FROM bot_private_chats').get().pinned,1);
+});
+test('bot chat: repeated start/help edits the same welcome, duplicate webhook has no new effects',async()=>{
+ const e=privateEnv(),calls=telegramMock();await worker.fetch(privateMessage(),e);
+ await worker.fetch(privateMessage('/help',{id:201}),e);const count=calls.length;
+ await worker.fetch(privateMessage('/help',{id:201}),e);assert.equal(calls.length,count);
+ assert.equal(calls.filter(c=>c.method==='sendMessage').length,1);assert.equal(calls.filter(c=>c.method==='editMessageText').length,1);assert.equal(e.sqlite.prepare('SELECT welcome_message_id FROM bot_private_chats').get().welcome_message_id,100);
+});
+test('bot chat: concurrent incoming messages share one pinned welcome',async()=>{
+ const e=privateEnv(),calls=telegramMock();await Promise.all([worker.fetch(privateMessage(),e),worker.fetch(privateMessage('/start',{id:201}),e)]);
+ assert.equal(calls.filter(c=>c.method==='sendMessage').length,1);assert.equal(calls.filter(c=>c.method==='pinChatMessage').length,1);
+ assert.equal(e.sqlite.prepare("SELECT COUNT(*) n FROM private_message_cleanup WHERE state='done'").get().n,2);
+});
+test('bot chat: ordinary text and files disappear without new replies; no input content is stored',async()=>{
+ const e=privateEnv(),calls=telegramMock();await worker.fetch(privateMessage(),e);const n=calls.length;
+ await worker.fetch(privateMessage('PRIVATE CUSTOMER QUESTION',{id:201}),e);
+ await worker.fetch(privateMessage(null,{id:202,extra:{document:{file_id:'PRIVATE FILE'}}}),e);
+ assert.deepEqual(calls.slice(n).map(c=>c.method),['deleteMessage','deleteMessage']);
+ const rows=e.sqlite.prepare('SELECT * FROM private_message_cleanup').all();assert(!JSON.stringify(rows).includes('PRIVATE'));assert.equal(e.sqlite.prepare('SELECT COUNT(*) n FROM orders').get().n,0);
+});
+test('bot chat: failed pin preserves input and maintenance pins existing welcome without sending another',async()=>{
+ const e=privateEnv();telegramMock(method=>method==='pinChatMessage'?Response.json({ok:false,error_code:400},{status:400}):undefined);
+ await worker.fetch(privateMessage(),e);assert.equal(e.sqlite.prepare('SELECT pinned FROM bot_private_chats').get().pinned,0);assert.equal(e.sqlite.prepare('SELECT state FROM private_message_cleanup').get().state,'pending');
+ const calls=telegramMock();await maintenance(e);assert.equal(calls.filter(c=>c.method==='sendMessage').length,0);assert(calls.some(c=>c.method==='pinChatMessage'));assert(calls.some(c=>c.method==='deleteMessage'));
+});
+test('bot chat: missing welcome is recreated only after a confirmed missing-message error',async()=>{
+ const e=privateEnv();const calls=telegramMock((method)=>method==='editMessageText'?Response.json({ok:false,error_code:400,description:'Bad Request: message to edit not found'},{status:400}):undefined);
+ await worker.fetch(privateMessage(),e);await worker.fetch(privateMessage('/start',{id:201}),e);
+ assert.equal(calls.filter(c=>c.method==='sendMessage').length,2);assert.equal(e.sqlite.prepare('SELECT welcome_message_id FROM bot_private_chats').get().welcome_message_id,101);
+});
+test('bot chat: ambiguous welcome is held and input stays intact without automatic duplicate sends',async()=>{
+ const e=privateEnv(),calls=telegramMock(method=>{if(method==='sendMessage')throw Error('Network response lost')});
+ await worker.fetch(privateMessage(),e);await worker.fetch(privateMessage('hello',{id:201}),e);await maintenance(e);
+ assert.equal(calls.filter(c=>c.method==='sendMessage').length,1);assert.equal(calls.some(c=>c.method==='deleteMessage'),false);assert.equal(e.sqlite.prepare('SELECT welcome_state FROM bot_private_chats').get().welcome_state,'uncertain');
+});
+test('bot chat: deletion rate errors keep a bounded retry job and never delete the welcome',async()=>{
+ const e=privateEnv();telegramMock(method=>method==='deleteMessage'?Response.json({ok:false,error_code:429,parameters:{retry_after:90}},{status:429}):undefined);
+ await worker.fetch(privateMessage(),e);const job=e.sqlite.prepare('SELECT * FROM private_message_cleanup').get();assert.equal(job.state,'pending');assert(job.available_at>Date.now()+80000);
+ const calls=telegramMock();await maintenance(e);assert.equal(calls.length,0);
+ e.sqlite.exec("UPDATE private_message_cleanup SET available_at=0");await Promise.all([maintenance(e),maintenance(e)]);
+ assert.equal(calls.filter(c=>c.method==='deleteMessage').length,1);assert.equal(calls[0].form.get('message_id'),'200');assert.equal(e.sqlite.prepare('SELECT state FROM private_message_cleanup').get().state,'done');
+});
+test('bot chat: deletion of an already missing message completes without retries',async()=>{
+ const e=privateEnv();telegramMock(method=>method==='deleteMessage'?Response.json({ok:false,error_code:400,description:'Bad Request: message to delete not found'},{status:400}):undefined);
+ await worker.fetch(privateMessage(),e);assert.equal(e.sqlite.prepare('SELECT state FROM private_message_cleanup').get().state,'done');
+});
+test('bot chat: groups, mismatched private identities, bot messages and service updates are untouched',async()=>{
+ const e=privateEnv(),calls=telegramMock();
+ await worker.fetch(privateMessage('group text',{chat:-100123456789,type:'supergroup'}),e);
+ await worker.fetch(privateMessage('/start',{chat:99}),e);
+ await worker.fetch(privateMessage('/start',{extra:{from:{id:42,is_bot:true}}}),e);
+ await worker.fetch(privateMessage(null,{extra:{pinned_message:{message_id:5,text:'keep'}}}),e);
+ assert.equal(calls.length,0);assert.equal(e.sqlite.prepare('SELECT COUNT(*) n FROM bot_private_chats').get().n,0);
+});
+test('bot chat: cleanup is disabled unless explicitly enabled for the environment',async()=>{
+ const e={...env(),TELEGRAM_WEBHOOK_SECRET:WEBHOOK_SECRET},calls=telegramMock();await worker.fetch(privateMessage(),e);
+ assert.deepEqual(calls.map(c=>c.method),['sendMessage','pinChatMessage']);assert(!calls[0].form.get('text').includes('очищаются автоматически'));
+ assert.equal(e.sqlite.prepare('SELECT COUNT(*) n FROM private_message_cleanup').get().n,0);
+});
+test('bot chat: Telegram dice deletion is deferred for 24 hours and old inputs are never deleted',async()=>{
+ const e=privateEnv(),calls=telegramMock();await worker.fetch(privateMessage(null,{extra:{dice:{emoji:'🎲',value:1}}}),e);
+ assert.equal(calls.some(c=>c.method==='deleteMessage'),false);assert(e.sqlite.prepare('SELECT available_at FROM private_message_cleanup').get().available_at>Date.now()+23*3600000);
+ await worker.fetch(privateMessage('old text',{id:201,date:Math.floor(Date.now()/1000)-49*3600}),e);
+ assert.equal(e.sqlite.prepare('SELECT COUNT(*) n FROM private_message_cleanup').get().n,1);
+});
+test('bot profile: descriptions respect Telegram limits and setup is protected and verified',async()=>{
+ const {SHORT_DESCRIPTION,DESCRIPTION,BOT_COMMANDS}=await import('../src/bot-profile.mjs');assert(SHORT_DESCRIPTION.length<=120);assert(DESCRIPTION.length<=512);
+ const e=privateEnv();e.ADMIN_SETUP_SECRET=WEBHOOK_SECRET;let description={},short={},commands={};
+ const calls=telegramMock((method,calls)=>{
+  const form=calls.at(-1).form,language=form.get('language_code')||'';
+  if(method==='getMe')return Response.json({ok:true,result:{username:e.BOT_USERNAME}});
+  if(method==='setMyDescription')description[language]=form.get('description');
+  if(method==='setMyShortDescription')short[language]=form.get('short_description');
+  if(method==='setMyCommands')commands[language]=JSON.parse(form.get('commands'));
+  if(method==='getMyDescription')return Response.json({ok:true,result:{description:description[language]}});
+  if(method==='getMyShortDescription')return Response.json({ok:true,result:{short_description:short[language]}});
+  if(method==='getMyCommands')return Response.json({ok:true,result:commands[language]});
+  if(method==='getChatMenuButton')return Response.json({ok:true,result:{type:'web_app',web_app:{url:e.MINI_APP_URL}}});
+ });
+ assert.equal((await worker.fetch(setupRequest({action:'bot_profile'},'bad'),e)).status,403);assert.equal(calls.length,0);
+ const response=await worker.fetch(setupRequest({action:'bot_profile'}),e);assert.equal(response.status,200);const data=await response.json();assert.equal(data.verified,true);assert.equal(data.cleanup,true);assert.deepEqual(commands.ru,BOT_COMMANDS);assert.equal(calls.some(c=>c.method==='sendMessage'),false);
+});
+test('bot profile: wrong bot identity cannot change descriptions',async()=>{
+ const e=privateEnv();e.ADMIN_SETUP_SECRET=WEBHOOK_SECRET;
+ const calls=telegramMock(method=>method==='getMe'?Response.json({ok:true,result:{username:'some_other_bot'}}):undefined);
+ const response=await worker.fetch(setupRequest({action:'bot_profile'}),e);assert.equal(response.status,409);assert.deepEqual(calls.map(c=>c.method),['getMe']);
+});
+test('bot chat: a database error after confirmed welcome delivery preserves its ID and does not resend',async()=>{
+ const e=privateEnv(),prepare=e.DB.prepare.bind(e.DB);let rejected=false;
+ e.DB.prepare=sql=>{
+  const statement=prepare(sql);
+  return {bind(...args){const bound=statement.bind(...args);if(sql.includes("SET welcome_state='ready',welcome_message_id="))return {...bound,async run(){if(!rejected){rejected=true;throw Error('Temporary storage error')}return bound.run()}};return bound}};
+ };
+ telegramMock();assert.equal((await worker.fetch(privateMessage(),e)).status,200);
+ assert.equal(e.sqlite.prepare('SELECT welcome_message_id FROM bot_private_chats').get().welcome_message_id,100);
+ const calls=telegramMock();await maintenance(e);assert.equal(calls.filter(c=>c.method==='sendMessage').length,0);assert(calls.some(c=>c.method==='pinChatMessage'));assert(calls.some(c=>c.method==='deleteMessage'));
 });

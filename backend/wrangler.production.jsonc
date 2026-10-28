@@ -7,6 +7,7 @@
   "vars": {
     "MINI_APP_URL": "https://websitepreview26.github.io/vashgruz/",
     "BOT_USERNAME": "vash_gruz_by_bot",
+    "CLEAN_PRIVATE_MESSAGES": "true",
     "ALLOWED_ORIGIN": "https://websitepreview26.github.io"
   },
   "d1_databases": [

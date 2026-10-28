@@ -115,7 +115,7 @@ async function telegram(env,method,body){
   if(data.ok!==true){
     if(method.startsWith('editMessage')&&Number(data.error_code)===400&&/message is not modified/i.test(String(data.description||'')))return true;
     if(response.status>=500||Number(data.error_code)>=500)throw new HttpError(409,'UNCERTAIN','Не удалось подтвердить доставку. Заявка требует проверки.');
-    throw new HttpError(502,'DELIVERY','Не удалось отправить заявку. Попробуйте ещё раз позже.',{telegramCode:Number(data.error_code)||response.status,retryAfter:Math.min(3600,Math.max(10,Number(data.parameters?.retry_after)||10))});
+    throw new HttpError(502,'DELIVERY','Не удалось отправить заявку. Попробуйте ещё раз позже.',{telegramCode:Number(data.error_code)||response.status,messageMissing:/message to (?:edit|delete|pin) not found|message_id_invalid/i.test(String(data.description||'')),retryAfter:Math.min(3600,Math.max(10,Number(data.parameters?.retry_after)||10))});
   }
   return data.result;
 }
@@ -180,7 +180,7 @@ async function dispatch(env,row,w,user,photos){
 }
 export default {
   async scheduled(controller,env,ctx){
-    ctx.waitUntil((async()=>{await statusService.flushOutbox(env);await stmt(env,'DELETE FROM request_limits WHERE expires_at<?',Date.now()).run()})());
+    ctx.waitUntil((async()=>{await statusService.flushOutbox(env);await statusService.maintainBotChat(env);await stmt(env,'DELETE FROM request_limits WHERE expires_at<?',Date.now()).run()})());
   },
   async fetch(request,env){
     const origin=request.headers.get('origin'),allowed=env.ALLOWED_ORIGIN;
