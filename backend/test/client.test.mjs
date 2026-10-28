@@ -350,7 +350,7 @@ test('floor picker selects high floors directly, keeps addresses independent and
 test('time options show ranges and custom time is validated, saved and displayed',()=>{
  const c=client();c.run("S.w=newW('trash');S.w.addr='Минск, Ленина 1';S.w.date=today();S.step=1;render()");
  for(const range of ['8:00–12:00','12:00–17:00','17:00–21:00'])assert(c.node('#view').innerHTML.includes(range));
- c.run("S.w.slot=4;render()");assert.match(c.node('#view').innerHTML,/type="time"/);assert.match(c.node('#view').innerHTML,/Или точное время/);assert(!c.node('#view').innerHTML.includes('data-a="slot" data-v="4"'));
+ c.run("S.w.slot=4;render()");assert.match(c.node('#view').innerHTML,/type="time"/);assert.match(c.node('#view').innerHTML,/Своё время/);assert(!c.node('#view').innerHTML.includes('data-a="slot" data-v="4"'));
  assert.equal(c.run('!!validate().customTimeFrom'),true);
  c.run("S.w.customTimeFrom='14:30';S.w.customTimeTo='16:00';storeDraft()");assert.equal(Object.keys(c.run('validate()')).length,0);
  assert.match(c.run('ticket(S.w)'),/14:30–16:00/);

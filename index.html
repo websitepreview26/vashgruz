@@ -435,7 +435,7 @@ function customTimeError(w){
 }
 function timeOptions(w){
  const field=(key,label)=>`<label class="field-label" for="${key}">${label}</label><div class="fld ${S.errors[key]?'invalid':''}"><input type="time" id="${key}" data-f="${key}" value="${esc(w[key]||'')}" aria-describedby="err-${key}" aria-invalid="${!!S.errors[key]}"></div>${error(key)}`;
- return `<p class="conditions-title">Удобное время</p><div class="slots time-options" role="group" aria-label="Удобное время">${SLOTS.slice(0,4).map((t,i)=>`<button class="slot" data-a="slot" data-v="${i}" aria-pressed="${i===w.slot}"><span>${t[0]}</span>${t[1]?`<small>${t[1]}</small>`:''}</button>`).join('')}</div><div class="custom-time-control" data-active="${w.slot===4}">${field('customTimeFrom','Или точное время')}<details class="time-end" ${w.customTimeTo||S.errors.customTimeTo?'open':''}><summary>Добавить время окончания</summary>${field('customTimeTo','До')}</details></div><p class="hint">Точное время согласуем после оценки.</p>`;
+ return `<p class="conditions-title">Удобное время</p><div class="slots time-options" role="group" aria-label="Удобное время">${SLOTS.slice(0,4).map((t,i)=>`<button class="slot" data-a="slot" data-v="${i}" aria-pressed="${i===w.slot}"><span>${t[0]}</span>${t[1]?`<small>${t[1]}</small>`:''}</button>`).join('')}</div><div class="custom-time-control" data-active="${w.slot===4}">${field('customTimeFrom','Своё время')}<details class="time-end" ${w.customTimeTo||S.errors.customTimeTo?'open':''}><summary>Добавить время окончания</summary>${field('customTimeTo','До')}</details></div><p class="hint">Точное время согласуем после оценки.</p>`;
 }
 function updateCustomTime(field){
  const w=S.w,key=field.dataset.f;if(!w||!['customTimeFrom','customTimeTo'].includes(key))return;
