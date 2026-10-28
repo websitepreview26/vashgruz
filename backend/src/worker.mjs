@@ -133,47 +133,42 @@ async function dispatch(env,row,w,user,photos){
     await consumeLimit(env,'delivery:user:'+row.user_id,20,3600000,rateError);
     const lock=await stmt(env,"UPDATE orders SET state='sending_text',delivery_attempts=delivery_attempts+1, updated_at=? WHERE id=? AND state='received' AND delivery_next_at<=? AND delivery_attempts<5 AND fingerprint=?",Date.now(),row.id,Date.now(),row.fingerprint).run();
     if(!lock.meta.changes)fail(409,'BUSY','Заявка уже отправляется. Подождите немного.');
-    const base=orderMessage(w,row.id,user,photos.length),kind=photos.length>1?'album':photos.length?'photo':'text';
+    const base=orderMessage(w,row.id,user,photos.length),kind=photos.length?'photo':'text';
     const form=bodyFor(env);form.set('protect_content','true');
     const caption=compactCaption(base+'\n\nСтатус: Получена');
     if(kind==='text')form.set('text',base+'\n\nСтатус: Получена');
     else if(kind==='photo'){form.set('photo',photos[0],'photo.jpg');form.set('caption',caption)}
-    else{
-      form.set('media',JSON.stringify(photos.map((file,i)=>{
-        form.set('photo'+i,file,`photo-${i+1}.jpg`);
-        return {type:'photo',media:'attach://photo'+i,...(i===0?{caption}:{})};
-      })));
-    }
-    if(kind!=='album')form.set('reply_markup',JSON.stringify(statusKeyboard({...row,message_kind:kind})));
+    form.set('reply_markup',JSON.stringify(statusKeyboard({...row,message_kind:kind})));
     await stmt(env,'UPDATE orders SET manager_text=?,message_kind=? WHERE id=?',base,kind,row.id).run();
     let result;
-    try{result=await telegram(env,kind==='text'?'sendMessage':kind==='photo'?'sendPhoto':'sendMediaGroup',form)}
+    try{result=await telegram(env,kind==='text'?'sendMessage':'sendPhoto',form)}
     catch(e){await stmt(env,'UPDATE orders SET state=?,updated_at=?,delivery_next_at=? WHERE id=?',['DELIVERY','RATE'].includes(e.code)?'received':'uncertain',Date.now(),Date.now()+Math.max(10,e.retryAfter||10)*1000,row.id).run();throw e}
     const messages=Array.isArray(result)?result:[result];
-    messageId=messages[0].message_id;state='sent';
+    messageId=messages[0].message_id;state=photos.length>1?'text_sent':'sent';
     const ids=messages.map(m=>m.photo?.at(-1)?.file_id).filter(Boolean);
-    await stmt(env,'UPDATE orders SET state=?,message_id=?,updated_at=?,buttons_version=?,manager_text=?,message_kind=?,photo_file_ids=? WHERE id=?',state,messageId,Date.now(),kind==='album'?0:1,base,kind,JSON.stringify(ids),row.id).run();
+    await stmt(env,'UPDATE orders SET state=?,message_id=?,updated_at=?,buttons_version=?,manager_text=?,message_kind=?,photo_file_ids=? WHERE id=?',state,messageId,Date.now(),1,base,kind,JSON.stringify(ids),row.id).run();
     row=await stmt(env,'SELECT * FROM orders WHERE id=?',row.id).first();
     await statusService.ensureMediaButtons(env,row);
   }
-  // Resume pre-upgrade deliveries whose separate text message already exists.
+  // Resume only the remaining photos after a confirmed cover card (or legacy text card).
   if(state==='text_sent'){
+    const remaining=row.message_kind==='photo'?photos.slice(1):photos;
     if(row.delivery_next_at>Date.now()||row.delivery_attempts>=5)fail(429,'RATE','Повторная отправка фото временно ограничена.');
     await consumeLimit(env,'delivery:user:'+row.user_id,20,3600000,rateError);
     const lock=await stmt(env,"UPDATE orders SET state='sending_photos',delivery_attempts=delivery_attempts+1,updated_at=? WHERE id=? AND state='text_sent' AND delivery_next_at<=? AND delivery_attempts<5 AND fingerprint=?",Date.now(),row.id,Date.now(),row.fingerprint).run();
     if(!lock.meta.changes)fail(409,'BUSY','Фотографии уже отправляются.');
     const form=bodyFor(env);form.set('protect_content','true');form.set('reply_parameters',JSON.stringify({message_id:messageId}));
-    if(photos.length===1){form.set('photo',photos[0],'photo.jpg');form.set('caption',`Фото к заявке ${row.id}`)}
+    if(remaining.length===1){form.set('photo',remaining[0],'photo.jpg');form.set('caption',`Фото к заявке ${row.id}`)}
     else{
-      const media=photos.map((file,i)=>{form.set('photo'+i,file,`photo-${i+1}.jpg`);return {type:'photo',media:'attach://photo'+i,...(i===0?{caption:`Фото к заявке ${row.id}`}:{})}});
+      const media=remaining.map((file,i)=>{form.set('photo'+i,file,`photo-${i+1}.jpg`);return {type:'photo',media:'attach://photo'+i,...(i===0?{caption:`Фото к заявке ${row.id}`}:{})}});
       form.set('media',JSON.stringify(media));
     }
     let result;
-    try{result=await telegram(env,photos.length===1?'sendPhoto':'sendMediaGroup',form)}
-    catch(e){await stmt(env,'UPDATE orders SET state=?,updated_at=?,delivery_next_at=? WHERE id=?',['DELIVERY','RATE'].includes(e.code)?'text_sent':'uncertain',Date.now(),Date.now()+Math.max(10,e.retryAfter||10)*1000,row.id).run();if(e.code==='DELIVERY')e.message='Заявка доставлена, фотографии — нет. Нажмите повторно: отправим только фото.';throw e}
+    try{result=await telegram(env,remaining.length===1?'sendPhoto':'sendMediaGroup',form)}
+    catch(e){await stmt(env,'UPDATE orders SET state=?,updated_at=?,delivery_next_at=? WHERE id=?',['DELIVERY','RATE'].includes(e.code)?'text_sent':'uncertain',Date.now(),Date.now()+Math.max(10,e.retryAfter||10)*1000,row.id).run();if(e.code==='DELIVERY')e.message='Карточка заявки доставлена, остальные фото – нет. Нажмите повторно: отправим только оставшиеся фото.';throw e}
     const messages=Array.isArray(result)?result:[result];
     const ids=messages.map(m=>m.photo?.at(-1)?.file_id).filter(Boolean);
-    await stmt(env,"UPDATE orders SET state='sent',photo_file_ids=?,updated_at=? WHERE id=?",JSON.stringify(ids),Date.now(),row.id).run();
+    await stmt(env,"UPDATE orders SET state='sent',photo_file_ids=?,updated_at=? WHERE id=?",JSON.stringify([...(JSON.parse(row.photo_file_ids||'[]')), ...ids]),Date.now(),row.id).run();
   }
   await statusService.received(env,row.id);
   return receipt(await stmt(env,'SELECT * FROM orders WHERE id=?',row.id).first());

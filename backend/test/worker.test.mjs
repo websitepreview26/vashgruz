@@ -55,7 +55,7 @@ function telegramMock(handler){
   globalThis.fetch=async(url,opts)=>{
     const method=url.split('/').at(-1);calls.push({method,form:opts.body});
     if(handler){const r=await handler(method,calls);if(r)return r}
-    const result=method==='sendMessage'?{message_id:99+calls.filter(c=>c.method==='sendMessage').length}:method==='sendPhoto'?{message_id:101,photo:[{file_id:'stored-photo'}]}:[{message_id:101,photo:[{file_id:'stored-1'}]},{message_id:102,photo:[{file_id:'stored-2'}]}];
+    const result=method==='sendMessage'?{message_id:99+calls.filter(c=>c.method==='sendMessage').length}:method==='sendPhoto'?{message_id:101,photo:[{file_id:'stored-photo'}]}:Array.from({length:JSON.parse(opts.body.get('media')||'[]').length},(_,i)=>({message_id:201+i,photo:[{file_id:'stored-'+(i+1)}]}));
     return Response.json({ok:true,result});
   };return calls;
 }
@@ -106,16 +106,47 @@ test('single photo is the order card with caption and controls, without separate
   const row=e.sqlite.prepare('SELECT * FROM orders').get();
   assert.equal(row.photo_file_ids,'["stored-photo"]');assert.equal(row.message_kind,'photo');assert.equal(row.message_id,101);
 });
-test('album has a separate control card linked to the photos',async()=>{
-  const e=env(),calls=telegramMock(),id=crypto.randomUUID();
-  const r=await worker.fetch(await request({id,files:[photo(),photo()]}),e);assert.equal((await r.json()).photoCount,2);
-  assert.deepEqual(calls.map(c=>c.method),['sendMediaGroup','sendMessage']);
-  const media=JSON.parse(calls[0].form.get('media'));assert.equal(media.length,2);
-  assert.match(media[0].caption,/Заявка на оценку/);assert.equal(media[1].caption,undefined);
-  assert.equal(JSON.parse(calls[1].form.get('reply_parameters')).message_id,101);assert.match(calls[1].form.get('reply_markup'),/Взять на оценку/);assert.match(calls[1].form.get('text'),/Минск, Ленина 1/);
-  const row=e.sqlite.prepare('SELECT * FROM orders').get();assert.equal(row.message_kind,'text');assert.equal(row.message_id,100);
-  assert.equal((await worker.fetch(await request({id,files:[photo(),photo()]}),e)).status,200);assert.equal(calls.length,2);
+test('two photos use a cover card with controls and one linked photo, without a duplicate cover',async()=>{
+ const e={...env(),TELEGRAM_WEBHOOK_SECRET:WEBHOOK_SECRET},calls=managerMock(),id=crypto.randomUUID();
+ const files=[photo(),new File([new Uint8Array([255,216,255,224,9,9,255,217])],'second.jpg',{type:'image/jpeg'})];
+ const r=await worker.fetch(await request({id,files}),e);assert.equal((await r.json()).photoCount,2);
+ assert.deepEqual(calls.map(c=>c.method),['sendPhoto','sendPhoto']);
+ assert.match(calls[0].form.get('caption'),/Заявка на оценку/);assert.match(calls[0].form.get('reply_markup'),/Взять на оценку/);
+ assert.equal(calls[1].form.get('reply_markup'),null);assert.equal(JSON.parse(calls[1].form.get('reply_parameters')).message_id,101);
+ assert.deepEqual(new Uint8Array(await calls[1].form.get('photo').arrayBuffer()),new Uint8Array(await files[1].arrayBuffer()));
+ const row=e.sqlite.prepare('SELECT * FROM orders').get();assert.equal(row.message_kind,'photo');assert.equal(row.message_id,101);
+ assert.equal(JSON.parse(row.photo_file_ids).length,2);
+ assert.equal((await worker.fetch(await request({id,files}),e)).status,200);assert.equal(calls.length,2);
+ await worker.fetch(callbackRequest(row.id,0,'processing',{message:101}),e);
+ assert.equal(e.sqlite.prepare('SELECT business_status FROM orders').get().business_status,'processing');
+ assert(calls.some(c=>c.method==='editMessageCaption'&&c.form.get('message_id')==='101'));
 });
+test('five photos use a cover card and an album containing only the other four',async()=>{
+ const e=env(),calls=telegramMock();await worker.fetch(await request({files:Array.from({length:5},photo)}),e);
+ assert.deepEqual(calls.map(c=>c.method),['sendPhoto','sendMediaGroup']);
+ const media=JSON.parse(calls[1].form.get('media'));assert.equal(media.length,4);
+ assert.equal(JSON.parse(calls[1].form.get('reply_parameters')).message_id,101);
+ assert.equal(JSON.parse(e.sqlite.prepare('SELECT photo_file_ids FROM orders').get().photo_file_ids).length,5);
+ assert.match(calls[0].form.get('caption'),/Фото: 5/);assert.match(calls[0].form.get('reply_markup'),/Полная заявка/);
+});
+test('concurrent submissions send one cover and one remaining album',async()=>{
+ const e=env(),calls=telegramMock(),id=crypto.randomUUID(),files=Array.from({length:3},photo);
+ const requests=await Promise.all([request({id,files}),request({id,files})]);
+ const responses=await Promise.all(requests.map(r=>worker.fetch(r,e)));assert(responses.some(r=>r.status===200));
+ assert.deepEqual(calls.map(c=>c.method),['sendPhoto','sendMediaGroup']);
+});
+test('reviewed remaining-photo delivery preserves the confirmed cover as the status target',async()=>{
+ const e={...env(),ADMIN_SETUP_SECRET:WEBHOOK_SECRET};telegramMock(method=>{if(method==='sendMediaGroup')throw Error('Lost')});
+ await worker.fetch(await request({files:Array.from({length:3},photo)}),e);
+ const row=e.sqlite.prepare('SELECT * FROM orders').get();assert.equal(row.message_id,101);
+ telegramMock();const result=await worker.fetch(setupRequest({action:'resolve_order',id:row.id,confirmation:row.id,expectedUpdatedAt:row.updated_at,outcome:'delivered',messageId:201,note:'Verified remaining album delivery'}),e);
+ assert.equal(result.status,200);assert.equal(e.sqlite.prepare('SELECT message_id FROM orders').get().message_id,101);
+ assert.equal(e.sqlite.prepare('SELECT state FROM orders').get().state,'sent');
+});
+async function legacyAlbum(e){
+ telegramMock();await worker.fetch(await request(),e);
+ e.sqlite.exec("UPDATE orders SET message_kind='album',photo_count=5,buttons_version=1");
+}
 test('definitive media rejection retries the combined card without creating text',async()=>{
   let reject=true;const e=env(),id=crypto.randomUUID(),calls=telegramMock(method=>{
     if(method==='sendPhoto'&&reject){reject=false;return Response.json({ok:false,error_code:400},{status:400})}
@@ -126,24 +157,26 @@ test('definitive media rejection retries the combined card without creating text
   const b=await worker.fetch(await request({id,files:[photo()]}),e);assert.equal((await b.json()).ok,true);
   assert.deepEqual(calls.map(c=>c.method),['sendPhoto','sendPhoto']);
 });
-test('album control card rejection is retried by maintenance without uploading photos again',async()=>{
-  let reject=true;const e=env(),id=crypto.randomUUID(),calls=telegramMock(method=>{
-    if(method==='sendMessage'&&reject){reject=false;return Response.json({ok:false,error_code:429,parameters:{retry_after:10}},{status:429})}
-  });
-  assert.equal((await worker.fetch(await request({id,files:[photo(),photo()]}),e)).status,200);
-  assert.equal(e.sqlite.prepare('SELECT state FROM orders').get().state,'sent');
-  e.sqlite.exec('UPDATE delivery_outbox SET available_at=0');
-  const pending=[];await worker.scheduled({},e,{waitUntil:p=>pending.push(p)});await Promise.all(pending);
-  assert.deepEqual(calls.map(c=>c.method),['sendMediaGroup','sendMessage','sendMessage']);
-  assert.equal(e.sqlite.prepare('SELECT message_kind FROM orders').get().message_kind,'text');
+test('remaining photo rejection retries only the extra photos, preserving the cover and controls',async()=>{
+ let reject=true;const e=env(),id=crypto.randomUUID(),calls=telegramMock(method=>{
+  if(method==='sendMediaGroup'&&reject){reject=false;return Response.json({ok:false,error_code:400},{status:400})}
+ });
+ const files=Array.from({length:3},photo);
+ assert.equal((await worker.fetch(await request({id,files}),e)).status,502);
+ const partial=e.sqlite.prepare('SELECT * FROM orders').get();assert.equal(partial.state,'text_sent');assert.equal(partial.message_kind,'photo');
+ e.sqlite.exec('UPDATE orders SET delivery_next_at=0');
+ assert.equal((await worker.fetch(await request({id,files}),e)).status,200);
+ assert.deepEqual(calls.map(c=>c.method),['sendPhoto','sendMediaGroup','sendMediaGroup']);
+ assert.equal(JSON.parse(calls.at(-1).form.get('media')).length,2);
+ assert.equal(JSON.parse(e.sqlite.prepare('SELECT photo_file_ids FROM orders').get().photo_file_ids)[0],'stored-photo');
 });
-test('lost album control response is held for review and cannot create duplicate controls or photos',async()=>{
- const e=env(),id=crypto.randomUUID(),calls=telegramMock(method=>{if(method==='sendMessage')throw Error('Connection lost')});
- assert.equal((await worker.fetch(await request({id,files:[photo(),photo()]}),e)).status,200);
- assert.equal(e.sqlite.prepare('SELECT state FROM delivery_outbox').get().state,'uncertain');
- await worker.fetch(await request({id,files:[photo(),photo()]}),e);
- const pending=[];await worker.scheduled({},e,{waitUntil:p=>pending.push(p)});await Promise.all(pending);
- assert.deepEqual(calls.map(c=>c.method),['sendMediaGroup','sendMessage']);
+test('lost remaining album response cannot duplicate the album or cover',async()=>{
+ const e=env(),id=crypto.randomUUID(),calls=telegramMock(method=>{if(method==='sendMediaGroup')throw Error('Connection lost')});
+ const files=Array.from({length:3},photo);
+ assert.equal((await worker.fetch(await request({id,files}),e)).status,409);
+ assert.equal(e.sqlite.prepare('SELECT state FROM orders').get().state,'uncertain');
+ assert.equal((await worker.fetch(await request({id,files}),e)).status,409);
+ assert.deepEqual(calls.map(c=>c.method),['sendPhoto','sendMediaGroup']);
 });
 test('maintenance repairs previously confirmed album keyboards exactly once',async()=>{
  const e={...env(),TELEGRAM_WEBHOOK_SECRET:WEBHOOK_SECRET},calls=managerMock();await worker.fetch(await request(),e);
@@ -161,8 +194,8 @@ test('concurrent album repair sends one control card',async()=>{
  assert.deepEqual(calls.map(c=>c.method),['sendMessage']);
 });
 test('reviewed album control delivery requires a message ID and repairs the callback target',async()=>{
- const e={...env(),ADMIN_SETUP_SECRET:WEBHOOK_SECRET};telegramMock(method=>{if(method==='sendMessage')throw Error('Connection lost')});
- await worker.fetch(await request({files:[photo(),photo()]}),e);
+ const e={...env(),ADMIN_SETUP_SECRET:WEBHOOK_SECRET};await legacyAlbum(e);telegramMock(method=>{if(method==='sendMessage')throw Error('Connection lost')});
+ const pending=[];await worker.scheduled({},e,{waitUntil:p=>pending.push(p)});await Promise.all(pending);
  const task=e.sqlite.prepare('SELECT * FROM delivery_outbox').get();
  const body={action:'resolve_notification',id:task.id,confirmation:task.id,outcome:'delivered',note:'Verified existing control card'};
  const resolve=()=>worker.fetch(new Request('https://api.example/internal/telegram/setup',{method:'POST',headers:{authorization:'Bearer '+WEBHOOK_SECRET},body:JSON.stringify(body)}),e);
