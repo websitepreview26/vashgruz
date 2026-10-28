@@ -348,8 +348,8 @@ try {
 const linkedOrder=tg?.initDataUnsafe?.start_param|| (window.location?.search?'order_'+new URLSearchParams(window.location.search).get('order'):'');
 let pendingOrderId=/^order_(VG-[A-F0-9]{12})$/.exec(linkedOrder)?.[1]||null;
 if(pendingOrderId)S.tab='orders';
-const newW = id => ({photos:[],sv:id||'trash',desc:'',addr:'',to:'',floor:null,lift:null,toFloor:null,toLift:null,liftType:null,toLiftType:null,liftFirstFloor:null,toLiftFirstFloor:null,location:null,dis:false,date:'',slot:0,customTimeFrom:'',customTimeTo:'',name:user?user.first_name:'',phone:cachedPhone()});
-function hasDraftContent(o){return !!(String(o.desc||'').trim()||String(o.addr||'').trim()||String(o.to||'').trim()||(o.photos?.length||o.photoCount)||o.date||o.dis||o.location||Number.isInteger(o.floor)||Number.isInteger(o.toFloor)||typeof o.lift==='boolean'||typeof o.toLift==='boolean'||o.slot>0)}
+const newW = id => ({photos:[],sv:id||'trash',desc:'',addr:'',to:'',floor:null,lift:null,toFloor:null,toLift:null,liftType:null,toLiftType:null,liftFirstFloor:null,toLiftFirstFloor:null,location:null,dis:false,date:today(),dateChosen:false,slot:0,customTimeFrom:'',customTimeTo:'',name:user?user.first_name:'',phone:cachedPhone()});
+function hasDraftContent(o){return !!(String(o.desc||'').trim()||String(o.addr||'').trim()||String(o.to||'').trim()||(o.photos?.length||o.photoCount)||(o.date&&o.dateChosen!==false)||o.dis||o.location||Number.isInteger(o.floor)||Number.isInteger(o.toFloor)||typeof o.lift==='boolean'||typeof o.toLift==='boolean'||o.slot>0)}
 function normalizeDrafts(){
  S.orders=S.orders.filter(ownsOrder);
  const drafts=S.orders.filter(o=>o.status!=='sent'&&o.customerVisibility!=='deleted'&&(!o.ownerId||o.ownerId===String(user?.id||'local'))&&hasDraftContent(o));
@@ -889,7 +889,7 @@ document.addEventListener('click',e=>{const b=e.target.closest('[data-a]');if(!b
  if(a==='refresh-orders'){lastStatusFetch=0;return syncOrders()}
  if(a==='tab'){if(v==='orders')lastStatusFetch=0;S.tab=v;S.anim='af';return render()}
  if(a==='start'){if(sv(v).hidden)return;S.phoneManual=false;S.contactError='';S.submitError='';S.photoError='';S.w=newW(v);S.step=0;S.errors={};S.anim='af';return render()}
- if(a==='again'||a==='open-request'){if(S.sheet)close();const o=S.orders.find(x=>x.id===v);if(!o)return;if(a==='open-request'&&o.status!=='draft'){S.discussing=false;S.decisionError='';S.last=o;S.tab='done';return render()}const cached=a==='again'?[]:photoCache.get(o.id)||[];S.photoError=a!=='again'&&o.photoCount&&!cached.length?'Фото из черновика нужно добавить заново.':'';S.submitError='';S.phoneManual=false;S.contactError='';S.w={...newW(o.sv),...o,...(a==='again'?{id:null,serverId:null,submitId:null,businessStatus:null,statusVersion:0,quote:null,customerVisibility:'active',customerNote:'',history:[],statusUpdatedAt:null,date:'',slot:0,customTimeFrom:'',customTimeTo:''}: {}),photos:cached};S.step=a==='again'?0:Math.min(o.step||0,2);S.errors={};return render()}
+ if(a==='again'||a==='open-request'){if(S.sheet)close();const o=S.orders.find(x=>x.id===v);if(!o)return;if(a==='open-request'&&o.status!=='draft'){S.discussing=false;S.decisionError='';S.last=o;S.tab='done';return render()}const cached=a==='again'?[]:photoCache.get(o.id)||[];S.photoError=a!=='again'&&o.photoCount&&!cached.length?'Фото из черновика нужно добавить заново.':'';S.submitError='';S.phoneManual=false;S.contactError='';S.w={...newW(o.sv),...o,...(a==='again'?{id:null,serverId:null,submitId:null,businessStatus:null,statusVersion:0,quote:null,customerVisibility:'active',customerNote:'',history:[],statusUpdatedAt:null,date:today(),dateChosen:false,slot:0,customTimeFrom:'',customTimeTo:''}: {}),photos:cached};S.step=a==='again'?0:Math.min(o.step||0,2);S.errors={};return render()}
  if(a==='back')return back();
  if(a==='exit'){storeDraft();S.w=null;S.errors={};S.tab='home';S.anim='ab';return render()}
  if(a==='edit'){S.step=+v;S.errors={};return render()}
@@ -904,8 +904,8 @@ document.addEventListener('click',e=>{const b=e.target.closest('[data-a]');if(!b
  if(a==='lift-detail'){w[k]=w[k]===v?null:v;storeDraft();return keep(()=>{})}
  if(a==='lift-choice'){const selected=v==='true';w[k]=w[k]===selected?null:selected;if(w[k]!==true){w[k==='toLift'?'toLiftType':'liftType']=null;w[k==='toLift'?'toLiftFirstFloor':'liftFirstFloor']=null}storeDraft();return keep(()=>{})}
  if(a==='pick'){if(sv(v).hidden)return;w.sv=v;if(!isRemoval(v))w.location=null;S.errors={};close();return keep(()=>{})}
- if(a==='pickd'){w.date=v;close();return keep(()=>{})}
- keep(()=>{if(a==='slot'){w.slot=+v;w.customTimeFrom='';w.customTimeTo='';delete S.errors.customTimeFrom;delete S.errors.customTimeTo;}if(a==='tgl')w[k]=!w[k];if(a==='day'){w.date=v;if(!v){w.slot=0;w.customTimeFrom='';w.customTimeTo='';delete S.errors.customTimeFrom;delete S.errors.customTimeTo;}}})
+ if(a==='pickd'){w.date=v;w.dateChosen=true;close();return keep(()=>{})}
+ keep(()=>{if(a==='slot'){w.slot=+v;w.customTimeFrom='';w.customTimeTo='';delete S.errors.customTimeFrom;delete S.errors.customTimeTo;}if(a==='tgl')w[k]=!w[k];if(a==='day'){w.date=v;w.dateChosen=true;if(!v){w.slot=0;w.customTimeFrom='';w.customTimeTo='';delete S.errors.customTimeFrom;delete S.errors.customTimeTo;}}})
 });
 // Render the previous screen without changing the live form or its data.
 function backPreview(){

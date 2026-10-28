@@ -366,3 +366,11 @@ test('direct time input selects custom time and clearing it returns to any time'
  c.run("updateCustomTime({dataset:{f:'customTimeTo'},value:'17:00'})");assert.match(c.run('ticket(S.w)'),/15:30–17:00/);
  c.run("updateCustomTime({dataset:{f:'customTimeFrom'},value:''})");assert.equal(c.run('S.w.slot'),0);assert.equal(c.run('S.w.customTimeTo'),'');
 });
+
+test('new requests default to today without creating an empty draft or overriding a restored date',()=>{
+ const c=client();c.run("S.w=newW('trash');S.step=1;render()");
+ assert.equal(c.run('S.w.date'),c.run('today()'));assert.match(c.node('#view').innerHTML,/aria-pressed="true"><small>Сегодня/);
+ c.run('storeDraft()');assert.equal(c.run('S.orders.length'),0);
+ c.run("S.w={...newW('trash'),date:'',desc:'Saved draft'};render()");assert.equal(c.run('S.w.date'),'');
+ c.run("S.w.date=today();S.w.dateChosen=true;S.w.desc='';storeDraft()");assert.equal(c.run('S.orders.length'),1);
+});
