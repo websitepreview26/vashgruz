@@ -24,9 +24,13 @@ export function parseQuote(text){
  const amount=Number(match[1])*100+Number((match[2]||'').padEnd(2,'0')),note=rest.join('\n').trim();
  return amount>0&&note.length<=600?{amount,note}:null;
 }
-export function statusKeyboard(row,confirmCancel=false){
+  function managerText(row,message){
+   const w=JSON.parse(row.payload),base=row.manager_text||message?.text?.replace(/\n\nСтатус: [^\n]*$/,'')||[`Заявка на оценку ${row.id}`,w.desc||'Без описания',`Адрес: ${w.addr}`,w.to?`Куда: ${w.to}`:'',`Телефон: ${w.phone}`,`Клиент ID ${row.user_id}`].filter(Boolean).join('\n');
+   return base+'\n\nСтатус: '+STATUS_LABELS[row.business_status]+(row.quote_amount_minor?'\nПредложение: '+money(row.quote_amount_minor)+(row.quote_note?'\n'+row.quote_note.replace(/\s+/g,' '):''):'')+(row.customer_note?'\nВопрос клиента: '+row.customer_note.replace(/\s+/g,' '):'');
+  }
+export function statusKeyboard(row,confirmCancel=false,fullText=managerText(row)){
  const data=action=>`vg:${row.id}:${row.business_version||0}:${action}`;
- const details=row.message_kind&&row.message_kind!=='text'?[[{text:'Полная заявка',callback_data:data('details')}]]:[];
+ const details=row.message_kind&&row.message_kind!=='text'&&compactCaption(fullText)!==fullText?[[{text:'Полная заявка',callback_data:data('details')}]]:[];
  if(terminal.has(row.business_status))return {inline_keyboard:details};
  if(confirmCancel)return {inline_keyboard:[[{text:'Да, закрыть заявку',callback_data:data('cancelled')}],[{text:'Назад',callback_data:data('back')}]]};
  const buttons=row.business_status==='received'?[{text:'Взять на оценку',callback_data:data('processing')}]:[{text:row.business_status==='quoted'?'Изменить цену':'Назвать цену',callback_data:data('price')}];
@@ -100,12 +104,8 @@ export function createStatusService({telegram,stmt,fail}){
    const f=new FormData();f.set('chat_id',env.TELEGRAM_CHAT_ID);f.set('user_id',String(id));
    try{const member=await telegram(env,'getChatMember',f);return ['creator','administrator'].includes(member.status)}catch{return false}
   }
-  function managerText(row,message){
-   const w=JSON.parse(row.payload),base=row.manager_text||message?.text?.replace(/\n\nСтатус: [^\n]*$/,'')||[`Заявка на оценку ${row.id}`,w.desc||'Без описания',`Адрес: ${w.addr}`,w.to?`Куда: ${w.to}`:'',`Телефон: ${w.phone}`,`Клиент ID ${row.user_id}`].filter(Boolean).join('\n');
-   return base+'\n\nСтатус: '+STATUS_LABELS[row.business_status]+(row.quote_amount_minor?'\nПредложение: '+money(row.quote_amount_minor)+(row.quote_note?'\n'+row.quote_note.replace(/\s+/g,' '):''):'')+(row.customer_note?'\nВопрос клиента: '+row.customer_note.replace(/\s+/g,' '):'');
-  }
   async function edit(env,row,message,confirmCancel=false){
-   const form=new FormData();form.set('chat_id',env.TELEGRAM_CHAT_ID);form.set('message_id',String(row.message_id));form.set('reply_markup',JSON.stringify(statusKeyboard(row,confirmCancel)));
+   const form=new FormData();form.set('chat_id',env.TELEGRAM_CHAT_ID);form.set('message_id',String(row.message_id));form.set('reply_markup',JSON.stringify(statusKeyboard(row,confirmCancel,managerText(row,message))));
    if(confirmCancel||(!message?.text&&!row.manager_text))return telegram(env,'editMessageReplyMarkup',form);
    if(row.message_kind&&row.message_kind!=='text'){form.set('caption',compactCaption(managerText(row,message)));return telegram(env,'editMessageCaption',form)}
    form.set('text',managerText(row,message));return telegram(env,'editMessageText',form);

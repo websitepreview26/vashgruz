@@ -144,7 +144,7 @@ async function dispatch(env,row,w,user,photos){
     const caption=compactCaption(base+'\n\nСтатус: Получена');
     if(kind==='text')form.set('text',base+'\n\nСтатус: Получена');
     else if(kind==='photo'){form.set('photo',photos[0],'photo.jpg');form.set('caption',caption)}
-    form.set('reply_markup',JSON.stringify(statusKeyboard({...row,message_kind:kind})));
+    form.set('reply_markup',JSON.stringify(statusKeyboard({...row,message_kind:kind},false,base+'\n\nСтатус: Получена')));
     await stmt(env,'UPDATE orders SET manager_text=?,message_kind=? WHERE id=?',base,kind,row.id).run();
     let result;
     try{result=await telegram(env,kind==='text'?'sendMessage':'sendPhoto',form)}

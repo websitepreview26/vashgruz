@@ -127,7 +127,7 @@ test('five photos use a cover card and an album containing only the other four',
  const media=JSON.parse(calls[1].form.get('media'));assert.equal(media.length,4);
  assert.equal(JSON.parse(calls[1].form.get('reply_parameters')).message_id,101);
  assert.equal(JSON.parse(e.sqlite.prepare('SELECT photo_file_ids FROM orders').get().photo_file_ids).length,5);
- assert.match(calls[0].form.get('caption'),/Фото: 5/);assert.match(calls[0].form.get('reply_markup'),/Полная заявка/);
+ assert.match(calls[0].form.get('caption'),/Фото: 5/);assert(!calls[0].form.get('reply_markup').includes('Полная заявка'));
 });
 test('concurrent submissions send one cover and one remaining album',async()=>{
  const e=env(),calls=telegramMock(),id=crypto.randomUUID(),files=Array.from({length:3},photo);
@@ -818,4 +818,17 @@ test('custom arrival times validate and reach both manager card and customer ord
  assert.equal(validateOrder({...data,customTimeTo:''}).customTimeFrom,'14:30');
  for(const changes of [{customTimeFrom:''},{customTimeFrom:'25:00'},{customTimeTo:'14:30'},{customTimeTo:'13:00'},{customTimeTo:'23:99'},{date:''}])assert.throws(()=>validateOrder({...data,...changes}),{code:'ORDER'});
  const standard=validateOrder({...data,slot:2});assert.equal(standard.customTimeFrom,undefined);assert.equal(standard.customTimeTo,undefined);
+});
+
+test('full request button is shown only when the actual photo caption is shortened',async()=>{
+ const e={...env(),TELEGRAM_WEBHOOK_SECRET:WEBHOOK_SECRET},calls=managerMock();
+ const created=await (await worker.fetch(await request({files:[photo()]}),e)).json();
+ assert(!calls[0].form.get('reply_markup').includes('Полная заявка'));
+ e.sqlite.prepare('UPDATE orders SET manager_text=? WHERE id=?').run('Long description '.repeat(100),created.id);
+ await worker.fetch(callbackRequest(created.id,0,'processing',{message:101}),e);
+ let edit=calls.filter(c=>c.method==='editMessageCaption').at(-1);assert(edit.form.get('reply_markup').includes('Полная заявка'));assert(edit.form.get('caption').length<=1024);
+ e.sqlite.prepare('UPDATE orders SET manager_text=? WHERE id=?').run('Short description',created.id);
+ await worker.fetch(callbackRequest(created.id,1,'ask_cancel',{message:101}),e);
+ await worker.fetch(callbackRequest(created.id,1,'back',{message:101}),e);
+ edit=calls.filter(c=>c.method==='editMessageCaption').at(-1);assert(!edit.form.get('reply_markup').includes('Полная заявка'));
 });
