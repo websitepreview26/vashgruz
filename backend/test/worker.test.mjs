@@ -809,3 +809,13 @@ test('welcome photo: failed media changes remain pending even if the text revisi
  profileWithChatMock(e,method=>method==='editMessageMedia'?Response.json({ok:false,error_code:400,description:'Bad Request: failed to get HTTP URL content'},{status:400}):undefined);
  const response=await worker.fetch(setupRequest({action:'bot_profile'}),e);assert.equal(response.status,200);assert.equal((await response.json()).welcomeRefresh.remaining,1);assert.equal(e.sqlite.prepare('SELECT welcome_kind FROM bot_private_chats').get().welcome_kind,'text');
 });
+
+test('custom arrival times validate and reach both manager card and customer order',async()=>{
+ const date=new Date(Date.now()+86400000).toLocaleDateString('en-CA',{timeZone:'Europe/Minsk'});
+ const e=env(),calls=telegramMock(),data={...order(),date,slot:4,customTimeFrom:'14:30',customTimeTo:'16:00'};
+ const r=await worker.fetch(await request({data}),e);assert.equal(r.status,200);assert.match(calls[0].form.get('text'),/14:30–16:00/);
+ const list=await (await worker.fetch(await listRequest(),e)).json();assert.equal(list.orders[0].customTimeFrom,'14:30');assert.equal(list.orders[0].customTimeTo,'16:00');
+ assert.equal(validateOrder({...data,customTimeTo:''}).customTimeFrom,'14:30');
+ for(const changes of [{customTimeFrom:''},{customTimeFrom:'25:00'},{customTimeTo:'14:30'},{customTimeTo:'13:00'},{customTimeTo:'23:99'},{date:''}])assert.throws(()=>validateOrder({...data,...changes}),{code:'ORDER'});
+ const standard=validateOrder({...data,slot:2});assert.equal(standard.customTimeFrom,undefined);assert.equal(standard.customTimeTo,undefined);
+});

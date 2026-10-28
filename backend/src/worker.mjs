@@ -66,10 +66,16 @@ export function validateOrder(raw){
     if(value!==null&&typeof value!=='boolean')fail(400,'ORDER','Проверьте этаж остановки лифта.');
     if(w[lift]===true&&value!==null)w[key]=value;
   }
-  if(!Number.isInteger(raw.slot)||raw.slot<0||raw.slot>3)fail(400,'ORDER','Проверьте время.');w.slot=raw.slot;
+  if(!Number.isInteger(raw.slot)||raw.slot<0||raw.slot>4)fail(400,'ORDER','Проверьте время.');w.slot=raw.slot;
   const date=text('date',10),today=new Date().toLocaleDateString('en-CA',{timeZone:'Europe/Minsk'});
   if(date&&(!/^\d{4}-\d{2}-\d{2}$/.test(date)||Number.isNaN(Date.parse(date+'T12:00:00Z'))||new Date(date+'T12:00:00Z').toISOString().slice(0,10)!==date||date<today))fail(400,'ORDER','Выберите сегодняшнюю или будущую дату.');
-  w.date=date;return w;
+  w.date=date;
+  if(w.slot===4){
+    const from=text('customTimeFrom',5),to=text('customTimeTo',5),valid=value=>/^([01]\d|2[0-3]):[0-5]\d$/.test(value);
+    if(!date||!valid(from)||(to&&(!valid(to)||to<=from)))fail(400,'ORDER','Укажите дату и корректный промежуток времени.');
+    w.customTimeFrom=from;w.customTimeTo=to;
+  }
+  return w;
 }
 export async function validatePhotos(files){
   if(files.length>5)fail(400,'PHOTOS','Можно прикрепить до 5 фотографий.');
@@ -97,7 +103,7 @@ export function orderMessage(w,id,user,photoCount){
     `Заявка на оценку ${id}`,names[w.sv],w.desc.replace(/\s+/g,' ')||'Без описания',
     `Адрес: ${w.addr}`,w.location==='outside'?'Уже на улице':w.location==='indoor'?'Из помещения · '+floor(w.floor,w.lift,w.liftType,w.liftFirstFloor):floor(w.floor,w.lift,w.liftType,w.liftFirstFloor),
     ...((w.sv==='flat'||w.sv==='office')?[`Куда: ${w.to}`,floor(w.toFloor,w.toLift,w.toLiftType,w.toLiftFirstFloor)]:[]),
-    ...(w.dis?['Нужна разборка']:[]),`Когда: ${w.date||'По согласованию'}${w.date?', '+slots[w.slot]:''}`,
+    ...(w.dis?['Нужна разборка']:[]),`Когда: ${w.date||'По согласованию'}${w.date?', '+(w.slot===4?w.customTimeFrom+(w.customTimeTo?'–'+w.customTimeTo:''):slots[w.slot]):''}`,
     `Имя: ${w.name||user.first_name||'Не указано'}`,`Телефон: ${w.phone}`,
     `Клиент: ${user.username?'@'+user.username+' · ':''}ID ${user.id}`,`Фото: ${photoCount}`
   ].join('\n');

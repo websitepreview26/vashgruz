@@ -232,7 +232,7 @@ body{background:var(--bg)}.app-toolbar{display:flex;align-items:center;justify-c
 .address-group .conditions{padding:0;background:transparent;border:0;box-shadow:none}
 .address-group>.error:empty{display:none}
 .day-unsure{width:auto;min-width:116px;padding:10px 14px;display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:500;white-space:nowrap}
-.time-options{grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;margin-top:8px}.time-options .slot{justify-content:center;min-height:46px;padding:11px 5px;font-size:14px;font-weight:500;border-radius:12px}.time-options .slot[aria-pressed=true]{background:color-mix(in srgb,var(--acc) 12%,var(--card))}
+.time-options{grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin-top:8px}.time-options .slot{flex-direction:column;gap:3px;justify-content:center;min-height:46px;padding:11px 5px;font-size:14px;font-weight:500;border-radius:12px}.time-options .slot:last-child{grid-column:1/-1}.custom-time{display:grid;grid-template-columns:1fr 1fr;gap:12px}.custom-time input{width:100%;min-width:0;padding:0 10px;background:transparent;border:0;font:inherit;color:var(--ink)}.time-options .slot[aria-pressed=true]{background:color-mix(in srgb,var(--acc) 12%,var(--card))}
 .pickup-place{display:flex;gap:8px;margin:12px 0 4px}.pickup-place button,.lift-options button{border:1px solid var(--line);border-radius:10px;padding:10px;background:var(--bg);font-size:13px;color:var(--mut)}.pickup-place button{flex:1}.pickup-place button[aria-pressed=true],.lift-options button[aria-pressed=true]{border-color:var(--acc);background:color-mix(in srgb,var(--acc) 12%,var(--card));color:var(--ink)}
 .lift-options{display:flex;gap:4px}.lift-options button{padding:8px;font-size:12px}.condition-optional{display:block;font-size:10px;color:var(--mut);font-weight:400}
 .quote-question{display:block;margin-top:16px;padding:8px 0;font-size:14px;color:var(--mut);text-decoration:underline;text-underline-offset:3px}
@@ -323,7 +323,7 @@ const SV = [
  {id:'load',hidden:true,r:45,n:'Услуги грузчиков',c:'#19b36b',d:'Погрузка и разгрузка',q:'С чем нужна помощь?',ph:'Например: поднять холодильник и стиральную машину на 4-й этаж'},
  {id:'rig',hidden:true,r:50,n:'Такелаж',c:'#d99a00',d:'Тяжёлое и крупное',q:'Что нужно переместить?',ph:'Например: сейф около 300 кг, с первого этажа в машину'},
  {id:'dem',r:0,n:'Демонтаж',c:'#ff4d6d',d:'Разобрать и вывезти',q:'Что нужно разобрать?',ph:'Например: разобрать кухню и вывезти старые шкафы'}];
-const SLOTS = [['Любое','','chat'],['Утро','8:00–12:00','sun'],['День','12:00–17:00','clock'],['Вечер','17:00–21:00','clock']];
+const SLOTS = [['Любое','','chat'],['Утро','8:00–12:00','sun'],['День','12:00–17:00','clock'],['Вечер','17:00–21:00','clock'],['Своё время','Указать','clock']];
 const sv = id => SV.find(s => s.id === id) || SV[0];
 const iso = d => d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
 const plus = n => { const d = new Date(); d.setDate(d.getDate()+n); return d; };
@@ -347,7 +347,7 @@ try {
 const linkedOrder=tg?.initDataUnsafe?.start_param|| (window.location?.search?'order_'+new URLSearchParams(window.location.search).get('order'):'');
 let pendingOrderId=/^order_(VG-[A-F0-9]{12})$/.exec(linkedOrder)?.[1]||null;
 if(pendingOrderId)S.tab='orders';
-const newW = id => ({photos:[],sv:id||'trash',desc:'',addr:'',to:'',floor:null,lift:null,toFloor:null,toLift:null,liftType:null,toLiftType:null,liftFirstFloor:null,toLiftFirstFloor:null,location:null,dis:false,date:'',slot:0,name:user?user.first_name:'',phone:cachedPhone()});
+const newW = id => ({photos:[],sv:id||'trash',desc:'',addr:'',to:'',floor:null,lift:null,toFloor:null,toLift:null,liftType:null,toLiftType:null,liftFirstFloor:null,toLiftFirstFloor:null,location:null,dis:false,date:'',slot:0,customTimeFrom:'',customTimeTo:'',name:user?user.first_name:'',phone:cachedPhone()});
 function hasDraftContent(o){return !!(String(o.desc||'').trim()||String(o.addr||'').trim()||String(o.to||'').trim()||(o.photos?.length||o.photoCount)||o.date||o.dis||o.location||Number.isInteger(o.floor)||Number.isInteger(o.toFloor)||typeof o.lift==='boolean'||typeof o.toLift==='boolean'||o.slot>0)}
 function normalizeDrafts(){
  S.orders=S.orders.filter(ownsOrder);
@@ -421,6 +421,21 @@ function photoPaint(){return new Promise(resolve=>{
  let done=false;const finish=()=>{if(done)return;done=true;clearTimeout(timer);resolve()},timer=setTimeout(finish,100);
  if(typeof window.requestAnimationFrame==='function')window.requestAnimationFrame(()=>setTimeout(finish,0));else setTimeout(finish,0);
 })}
+function timeText(w){
+ if(w.slot===4)return w.customTimeFrom+(w.customTimeTo?'–'+w.customTimeTo:'');
+ const slot=SLOTS[w.slot]||SLOTS[0];return slot[0].toLowerCase()+(slot[1]?' '+slot[1]:' время');
+}
+function customTimeError(w){
+ if(w.slot!==4)return {};
+ if(!w.date)return {date:'Выберите дату для своего времени.'};
+ const valid=value=>/^([01]\d|2[0-3]):[0-5]\d$/.test(value||'');
+ if(!valid(w.customTimeFrom))return {customTimeFrom:'Укажите время начала.'};
+ if(w.customTimeTo&&(!valid(w.customTimeTo)||w.customTimeTo<=w.customTimeFrom))return {customTimeTo:'Окончание должно быть позже начала.'};
+ return {};
+}
+function timeOptions(w){
+ return `<p class="conditions-title">Удобное время</p><div class="slots time-options" role="group" aria-label="Удобное время">${SLOTS.map((t,i)=>`<button class="slot" data-a="slot" data-v="${i}" aria-pressed="${i===w.slot}"><span>${t[0]}</span>${t[1]?`<small>${t[1]}</small>`:''}</button>`).join('')}</div>${w.slot===4?`<div class="custom-time">${[['customTimeFrom','С'],['customTimeTo','До · необязательно']].map(([key,label])=>`<div><label class="field-label" for="${key}">${label}</label><div class="fld ${S.errors[key]?'invalid':''}"><input type="time" id="${key}" data-f="${key}" value="${esc(w[key]||'')}" aria-describedby="err-${key}" aria-invalid="${!!S.errors[key]}"></div>${error(key)}</div>`).join('')}</div>`:''}<p class="hint">Точное время согласуем после оценки.</p>`;
+}
 function wizard(){
  const w=S.w,s=sv(w.sv),seg=[0,1,2].map(i=>`<i class="${i<=S.step?'on':''}"></i>`).join('');
  const bar=`<div class="bar"><button id="bk" data-a="back" aria-label="Назад">${ic('back')}</button><div class="seg">${seg}</div></div><p class="step-label">Шаг ${S.step+1} из 3 · ${['Задача','Место и время','Контакт'][S.step]}</p>`;
@@ -434,13 +449,13 @@ function wizard(){
  <div class="sec"><b>Когда удобно?</b><small>Можно уточнить позже</small></div>${error('date')}
  <div class="days"><button class="day day-unsure" data-a="day" data-v="" aria-pressed="${!w.date}">Пока не знаю</button>${Array.from({length:5},(_,i)=>plus(i)).map((d,i)=>`<button class="day" data-a="day" data-v="${iso(d)}" aria-pressed="${iso(d)===w.date}"><small>${i===0?'Сегодня':i===1?'Завтра':d.toLocaleDateString('ru-RU',{weekday:'short'})}</small><b>${d.getDate()}</b></button>`).join('')}</div>
  <button class="fld" data-a="sheet" data-v="cal">${ic('cal')}<span class="v">${w.date?esc(fd(w.date)):'Выбрать другую дату'}</span>${ic('chev')}</button>
- ${w.date?`<p class="conditions-title">Удобное время</p><div class="slots time-options" role="group" aria-label="Удобное время">${SLOTS.map((t,i)=>`<button class="slot" data-a="slot" data-v="${i}" aria-pressed="${i===w.slot}">${t[0]}</button>`).join('')}</div><p class="hint">Точное время согласуем после оценки.</p>`:''}`;
+ ${w.date?timeOptions(w):''}`;
  return bar+`<div class="hd"><h1>Куда сообщить стоимость?</h1><p class="sub">Предложение появится здесь, в приложении.</p></div>
  ${contactControl(w)}
  <div class="sec"><b>Ваша задача</b><button class="review-edit" data-a="edit" data-v="0">Изменить</button></div>${ticket(w)}
  <p class="error" role="alert">${esc(S.submitError)}</p>${API_BASE?'':'<p class="fine">Демо-режим: отправка ещё не подключена.</p>'}`;
 }
-function ticket(w){const s=sv(w.sv);const rows=[['Услуга',s.n],['Задача',w.desc||'Без описания'],...((w.photos?.length||w.photoCount)?[['Фото',String(w.photos?.length||w.photoCount)+' шт.']]:[]),['Адрес',w.addr],['Условия',isRemoval(w.sv)?w.location==='outside'?'Уже на улице':w.location==='indoor'?'Из помещения · '+floorText(w.floor,w.lift,w.liftType,w.liftFirstFloor):'Место не уточнено':floorText(w.floor,w.lift,w.liftType,w.liftFirstFloor)],...(s.mv?[['Куда',w.to],['На выгрузке',floorText(w.toFloor,w.toLift,w.toLiftType,w.toLiftFirstFloor)]]:[]),...(w.dis?[['Разборка','Нужна']]:[]),['Когда',fd(w.date)+(w.date?', '+(w.slot?SLOTS[w.slot][0].toLowerCase():'любое время'):'')]];return `<div class="ticket">${rows.map(([a,b])=>`<div class="r"><span>${a}</span><b>${esc(b)}</b></div>`).join('')}<div class="r tot"><span>${w.quote?'Предложение':'Стоимость'}</span><b style="font-size:16px">${w.quote?quoteMoney(w.quote.amountMinor):'После оценки'}</b></div></div>`}
+function ticket(w){const s=sv(w.sv);const rows=[['Услуга',s.n],['Задача',w.desc||'Без описания'],...((w.photos?.length||w.photoCount)?[['Фото',String(w.photos?.length||w.photoCount)+' шт.']]:[]),['Адрес',w.addr],['Условия',isRemoval(w.sv)?w.location==='outside'?'Уже на улице':w.location==='indoor'?'Из помещения · '+floorText(w.floor,w.lift,w.liftType,w.liftFirstFloor):'Место не уточнено':floorText(w.floor,w.lift,w.liftType,w.liftFirstFloor)],...(s.mv?[['Куда',w.to],['На выгрузке',floorText(w.toFloor,w.toLift,w.toLiftType,w.toLiftFirstFloor)]]:[]),...(w.dis?[['Разборка','Нужна']]:[]),['Когда',fd(w.date)+(w.date?', '+timeText(w):'')]];return `<div class="ticket">${rows.map(([a,b])=>`<div class="r"><span>${a}</span><b>${esc(b)}</b></div>`).join('')}<div class="r tot"><span>${w.quote?'Предложение':'Стоимость'}</span><b style="font-size:16px">${w.quote?quoteMoney(w.quote.amountMinor):'После оценки'}</b></div></div>`}
 const ORDER_STATES={
  delivery_pending:{title:'Проверяем доставку',short:'Проверяем доставку',text:'Заявка сохранена. Менеджеру необходимо проверить доставку. Повторно отправлять её не нужно.'},
  delivery_retry:{title:'Заявка не доставлена',short:'Не доставлена',text:'Доставка не выполнена. Можно проверить данные и повторить отправку этой заявки. Если лимит попыток исчерпан, потребуется помощь менеджера.'},
@@ -635,7 +650,7 @@ function close(){
  else $('#view').focus({preventScroll:true});
  sheetFocus=null;
 }
-function validate(){const w=S.w,e={};if(S.step===1){if(w.addr.trim().length<5)e.addr='Укажите улицу, дом и населённый пункт.';if(sv(w.sv).mv&&w.to.trim().length<5)e.to='Укажите адрес выгрузки.';if(w.date&&w.date<today())e.date='Выберите сегодняшнюю или будущую дату.'}if(S.step===2){const digits=w.phone.replace(/\D/g,'');if(!/^(?:375\d{9}|80\d{9})$/.test(digits))e.phone='Введите номер: +375 и 9 цифр, либо 8 0 и 9 цифр.'}return e}
+function validate(){const w=S.w,e={};if(S.step===1){if(w.addr.trim().length<5)e.addr='Укажите улицу, дом и населённый пункт.';if(sv(w.sv).mv&&w.to.trim().length<5)e.to='Укажите адрес выгрузки.';if(w.date&&w.date<today())e.date='Выберите сегодняшнюю или будущую дату.';Object.assign(e,customTimeError(w))}if(S.step===2){const digits=w.phone.replace(/\D/g,'');if(!/^(?:375\d{9}|80\d{9})$/.test(digits))e.phone='Введите номер: +375 и 9 цифр, либо 8 0 и 9 цифр.'}return e}
 function cachedPhone(){try{return localStorage.getItem(PHONE_STORAGE_KEY)||''}catch{return ''}}
 function cachePhone(phone){try{if(validPhone(phone))localStorage.setItem(PHONE_STORAGE_KEY,phone)}catch{}}
 function validPhone(phone){return /^\+?[1-9]\d{8,14}$/.test(String(phone||'').replace(/[\s()-]/g,''))}
@@ -710,7 +725,7 @@ async function submitOrder(){
  S.sending=true;S.submitError='';render();
  try{
   const form=new FormData();form.set('requestId',w.submitId);form.set('initData',tg.initData);
-  const payload={};for(const key of ['sv','desc','addr','to','floor','toFloor','lift','toLift','liftType','toLiftType','liftFirstFloor','toLiftFirstFloor','location','dis','date','slot','name','phone'])payload[key]=w[key];
+  const payload={};for(const key of ['sv','desc','addr','to','floor','toFloor','lift','toLift','liftType','toLiftType','liftFirstFloor','toLiftFirstFloor','location','dis','date','slot','customTimeFrom','customTimeTo','name','phone'])payload[key]=w[key];
   form.set('order',JSON.stringify(payload));
   for(const [i,p] of (w.photos||[]).entries())form.append('photos',p.blob,`photo-${i+1}.jpg`);
   const response=await fetch(API_BASE+'/api/orders',{method:'POST',headers:{'X-Telegram-Init-Data':tg.initData},body:form,signal:AbortSignal.timeout(90000)});
@@ -863,7 +878,7 @@ document.addEventListener('click',e=>{const b=e.target.closest('[data-a]');if(!b
  if(a==='refresh-orders'){lastStatusFetch=0;return syncOrders()}
  if(a==='tab'){if(v==='orders')lastStatusFetch=0;S.tab=v;S.anim='af';return render()}
  if(a==='start'){if(sv(v).hidden)return;S.phoneManual=false;S.contactError='';S.submitError='';S.photoError='';S.w=newW(v);S.step=0;S.errors={};S.anim='af';return render()}
- if(a==='again'||a==='open-request'){if(S.sheet)close();const o=S.orders.find(x=>x.id===v);if(!o)return;if(a==='open-request'&&o.status!=='draft'){S.discussing=false;S.decisionError='';S.last=o;S.tab='done';return render()}const cached=a==='again'?[]:photoCache.get(o.id)||[];S.photoError=a!=='again'&&o.photoCount&&!cached.length?'Фото из черновика нужно добавить заново.':'';S.submitError='';S.phoneManual=false;S.contactError='';S.w={...newW(o.sv),...o,...(a==='again'?{id:null,serverId:null,submitId:null,businessStatus:null,statusVersion:0,quote:null,customerVisibility:'active',customerNote:'',history:[],statusUpdatedAt:null,date:'',slot:0}: {}),photos:cached};S.step=a==='again'?0:Math.min(o.step||0,2);S.errors={};return render()}
+ if(a==='again'||a==='open-request'){if(S.sheet)close();const o=S.orders.find(x=>x.id===v);if(!o)return;if(a==='open-request'&&o.status!=='draft'){S.discussing=false;S.decisionError='';S.last=o;S.tab='done';return render()}const cached=a==='again'?[]:photoCache.get(o.id)||[];S.photoError=a!=='again'&&o.photoCount&&!cached.length?'Фото из черновика нужно добавить заново.':'';S.submitError='';S.phoneManual=false;S.contactError='';S.w={...newW(o.sv),...o,...(a==='again'?{id:null,serverId:null,submitId:null,businessStatus:null,statusVersion:0,quote:null,customerVisibility:'active',customerNote:'',history:[],statusUpdatedAt:null,date:'',slot:0,customTimeFrom:'',customTimeTo:''}: {}),photos:cached};S.step=a==='again'?0:Math.min(o.step||0,2);S.errors={};return render()}
  if(a==='back')return back();
  if(a==='exit'){storeDraft();S.w=null;S.errors={};S.tab='home';S.anim='ab';return render()}
  if(a==='edit'){S.step=+v;S.errors={};return render()}
@@ -879,7 +894,7 @@ document.addEventListener('click',e=>{const b=e.target.closest('[data-a]');if(!b
  if(a==='lift-choice'){const selected=v==='true';w[k]=w[k]===selected?null:selected;if(w[k]!==true){w[k==='toLift'?'toLiftType':'liftType']=null;w[k==='toLift'?'toLiftFirstFloor':'liftFirstFloor']=null}storeDraft();return keep(()=>{})}
  if(a==='pick'){if(sv(v).hidden)return;w.sv=v;if(!isRemoval(v))w.location=null;S.errors={};close();return keep(()=>{})}
  if(a==='pickd'){w.date=v;close();return keep(()=>{})}
- keep(()=>{if(a==='slot')w.slot=+v;if(a==='tgl')w[k]=!w[k];if(a==='day'){w.date=v;if(!v)w.slot=0}})
+ keep(()=>{if(a==='slot'){w.slot=+v;w.customTimeFrom='';w.customTimeTo='';delete S.errors.customTimeFrom;delete S.errors.customTimeTo;}if(a==='tgl')w[k]=!w[k];if(a==='day'){w.date=v;if(!v){w.slot=0;w.customTimeFrom='';w.customTimeTo='';delete S.errors.customTimeFrom;delete S.errors.customTimeTo;}}})
 });
 // Render the previous screen without changing the live form or its data.
 function backPreview(){

@@ -346,3 +346,16 @@ test('floor picker selects high floors directly, keeps addresses independent and
  c.run("selectFloor({dataset:{floor:'floor'},value:''})");assert.equal(c.run('S.w.floor'),null);assert.equal(c.run('S.w.toFloor'),40);
  for(const value of ['0','41','50','1.5','bad']){c.context.badFloor=value;c.run("selectFloor({dataset:{floor:'floor'},value:badFloor})");assert.equal(c.run('S.w.floor'),null)}
 });
+
+test('time options show ranges and custom time is validated, saved and displayed',()=>{
+ const c=client();c.run("S.w=newW('trash');S.w.addr='Минск, Ленина 1';S.w.date=today();S.step=1;render()");
+ for(const range of ['8:00–12:00','12:00–17:00','17:00–21:00'])assert(c.node('#view').innerHTML.includes(range));
+ c.run("S.w.slot=4;render()");assert.match(c.node('#view').innerHTML,/type="time"/);assert.match(c.node('#view').innerHTML,/Своё время/);
+ assert.equal(c.run('!!validate().customTimeFrom'),true);
+ c.run("S.w.customTimeFrom='14:30';S.w.customTimeTo='16:00';storeDraft()");assert.equal(Object.keys(c.run('validate()')).length,0);
+ assert.match(c.run('ticket(S.w)'),/14:30–16:00/);
+ const draft=JSON.parse(c.storage.get(c.run('ORDER_STORAGE_KEY')))[0];assert.equal(draft.customTimeFrom,'14:30');assert.equal(draft.customTimeTo,'16:00');
+ c.run("S.w.customTimeTo='14:00'");assert.equal(c.run('!!validate().customTimeTo'),true);
+ c.run("S.w.customTimeTo=''");assert.equal(Object.keys(c.run('validate()')).length,0);assert.match(c.run('ticket(S.w)'),/14:30/);
+ c.run("S.w.slot=2");assert.match(c.run('ticket(S.w)'),/12:00–17:00/);
+});
