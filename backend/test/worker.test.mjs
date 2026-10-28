@@ -44,9 +44,9 @@ function env(){
     async batch(statements){sqlite.exec('BEGIN');try{const results=statements.map(s=>({meta:{changes:Number(sqlite.prepare(s.sql).run(...s.args).changes)}}));sqlite.exec('COMMIT');return results}catch(e){sqlite.exec('ROLLBACK');throw e}}
   },sqlite};
 }
-async function request({id=crypto.randomUUID(),data=order(),files=[],init,origin=ORIGIN}={}){
+async function request({id=crypto.randomUUID(),data=order(),files=[],init,origin=ORIGIN,photoMode}={}){
   const signed=init??await auth();
-  const form=new FormData();form.set('initData',signed);form.set('requestId',id);form.set('order',JSON.stringify(data));
+  const form=new FormData();form.set('initData',signed);form.set('requestId',id);form.set('order',JSON.stringify(data));if(photoMode)form.set('photoMode',photoMode);
   files.forEach(f=>form.append('photos',f));
   return new Request('https://api.example/api/orders',{method:'POST',headers:{origin,'X-Telegram-Init-Data':signed},body:form});
 }
@@ -831,4 +831,63 @@ test('full request button is shown only when the actual photo caption is shorten
  await worker.fetch(callbackRequest(created.id,1,'ask_cancel',{message:101}),e);
  await worker.fetch(callbackRequest(created.id,1,'back',{message:101}),e);
  edit=calls.filter(c=>c.method==='editMessageCaption').at(-1);assert(!edit.form.get('reply_markup').includes('Полная заявка'));
+});
+
+test('audit fix: a nonempty question keeps the current quote available for acceptance',async()=>{
+ const {e,id}=await quoteFixture();
+ assert.equal((await worker.fetch(await decisionRequest(id,2,'discuss'),e)).status,400);
+ assert.equal((await worker.fetch(await decisionRequest(id,2,'discuss',{note:'Когда сможете приехать?'}),e)).status,200);
+ assert.equal((await worker.fetch(await decisionRequest(id,2,'accept'),e)).status,409);
+ const accepted=await worker.fetch(await decisionRequest(id,3,'accept'),e);assert.equal(accepted.status,200);assert.equal((await accepted.json()).order.businessStatus,'accepted');
+});
+test('audit fix: obsolete queued price notifications are superseded after a new quote',async()=>{
+ const e={...env(),TELEGRAM_WEBHOOK_SECRET:WEBHOOK_SECRET};let reject=true;
+ const calls=telegramMock(method=>{
+  if(method==='getChatMember')return Response.json({ok:true,result:{status:'administrator'}});
+  if(method.startsWith('editMessage')||method==='answerCallbackQuery')return Response.json({ok:true,result:true});
+  if(method==='sendMessage'&&calls.at(-1).form.get('chat_id')==='42'&&reject)return Response.json({ok:false,error_code:429},{status:429});
+ });
+ const {id}=await (await worker.fetch(await request(),e)).json();
+ await worker.fetch(callbackRequest(id,0,'processing'),e);await worker.fetch(callbackRequest(id,1,'price'),e);
+ let prompt=e.sqlite.prepare('SELECT message_id FROM quote_prompts ORDER BY message_id DESC').get();await worker.fetch(priceMessage(prompt.message_id,'100',501),e);
+ await worker.fetch(callbackRequest(id,2,'price'),e);prompt=e.sqlite.prepare('SELECT message_id FROM quote_prompts ORDER BY message_id DESC').get();
+ reject=false;await worker.fetch(priceMessage(prompt.message_id,'200',502),e);const count=calls.length;
+ e.sqlite.exec("UPDATE delivery_outbox SET payload=json_remove(payload,'$._quoteRevision') WHERE id='quote:501:sendMessage'; UPDATE order_status_events SET changed_at=1 WHERE status='quoted'");
+ e.sqlite.exec('UPDATE delivery_outbox SET available_at=0');await maintenance(e);
+ assert.equal(e.sqlite.prepare("SELECT state FROM delivery_outbox WHERE id='quote:501:sendMessage'").get().state,'superseded');
+ assert.equal(calls.slice(count).filter(c=>c.method==='sendMessage'&&c.form.get('chat_id')==='42').length,0);
+ const notice=calls.filter(c=>c.method==='sendMessage'&&c.form.get('chat_id')==='42').at(-1);
+ assert(!notice.form.get('text').includes('100 BYN'));assert(!notice.form.has('_quoteRevision'));assert.match(notice.form.get('text'),/Актуальная стоимость/);
+});
+test('audit fix: remaining photos can be reselected without changing or duplicating the delivered cover',async()=>{
+ const e=env(),id=crypto.randomUUID();let reject=true;
+ const calls=telegramMock(method=>{if(method==='sendMediaGroup'&&reject){reject=false;return Response.json({ok:false,error_code:400},{status:400})}});
+ assert.equal((await worker.fetch(await request({id,files:[photo(),photo(),photo()]}),e)).status,502);
+ const old=e.sqlite.prepare('SELECT * FROM orders').get();e.sqlite.exec('UPDATE orders SET delivery_next_at=0');
+ const list=await (await worker.fetch(await listRequest(),e)).json();assert.equal(list.orders[0].remainingPhotoCount,2);
+ const files=[new File([new Uint8Array([255,216,255,224,9,9,255,217])],'reselected.jpg',{type:'image/jpeg'}),photo()];
+ assert.equal((await worker.fetch(await request({id,files:[photo()],photoMode:'remaining'}),e)).status,400);
+ const other=await auth({user:JSON.stringify({id:99})});assert.equal((await worker.fetch(await request({id,files,photoMode:'remaining',init:other}),e)).status,404);
+ const result=await worker.fetch(await request({id,files,photoMode:'remaining',data:{...order(),addr:'Do not overwrite'}}),e);assert.equal(result.status,200);
+ const row=e.sqlite.prepare('SELECT * FROM orders').get();assert.equal(row.message_id,old.message_id);assert.equal(row.payload,old.payload);assert.equal(JSON.parse(row.photo_file_ids).length,3);
+ const count=calls.length;assert.equal((await worker.fetch(await request({id,files,photoMode:'remaining'}),e)).status,200);assert.equal(calls.length,count);
+ assert.deepEqual(calls.map(c=>c.method),['sendPhoto','sendMediaGroup','sendMediaGroup']);
+});
+test('audit fix: expired Minsk time windows are rejected but remaining and future windows are allowed',()=>{
+ const clock=new Date('2026-10-29T12:00:00Z'),base={...order(),date:'2026-10-29'};
+ assert.throws(()=>validateOrder({...base,slot:1},clock),{code:'ORDER'});
+ assert.equal(validateOrder({...base,slot:2},clock).slot,2);
+ assert.throws(()=>validateOrder({...base,slot:4,customTimeFrom:'14:00',customTimeTo:''},clock),{code:'ORDER'});
+ assert.equal(validateOrder({...base,slot:4,customTimeFrom:'14:00',customTimeTo:'16:00'},clock).slot,4);
+ assert.equal(validateOrder({...base,date:'2026-10-30',slot:1},clock).slot,1);
+ const midnight=new Date('2026-10-29T22:30:00Z');assert.throws(()=>validateOrder({...base,slot:0},midnight),{code:'ORDER'});
+});
+
+test('audit fix: an ambiguous remaining-photo send cannot be repeated automatically',async()=>{
+ const e=env(),id=crypto.randomUUID();let reject=true;
+ telegramMock(method=>{if(method==='sendMediaGroup'&&reject){reject=false;return Response.json({ok:false,error_code:400},{status:400})}});
+ await worker.fetch(await request({id,files:[photo(),photo(),photo()]}),e);e.sqlite.exec('UPDATE orders SET delivery_next_at=0');
+ const calls=telegramMock(()=>{throw Error('Lost response')});
+ assert.equal((await worker.fetch(await request({id,files:[photo(),photo()],photoMode:'remaining'}),e)).status,409);
+ assert.equal((await worker.fetch(await request({id,files:[photo(),photo()],photoMode:'remaining'}),e)).status,409);assert.equal(calls.length,1);
 });

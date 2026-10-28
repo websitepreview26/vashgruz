@@ -58,7 +58,7 @@ export function createStatusService({telegram,stmt,fail}){
   }
   function publicOrder(row,events=[]){return {
    ...JSON.parse(row.payload),serverId:row.id,requestId:row.request_id,status:'sent',deliveryState:row.state,businessStatus:row.state==='sent'?row.business_status:['received','text_sent'].includes(row.state)?'delivery_retry':'delivery_pending',
-   deliveryAttempts:row.delivery_attempts,deliveryRetryAt:row.delivery_next_at,statusVersion:row.business_version,statusUpdatedAt:row.status_updated_at,createdAt:row.created_at,photoCount:row.photo_count,
+   deliveryAttempts:row.delivery_attempts,deliveryRetryAt:row.delivery_next_at,remainingPhotoCount:row.state==='text_sent'?Math.max(0,row.photo_count-JSON.parse(row.photo_file_ids||'[]').length):0,statusVersion:row.business_version,statusUpdatedAt:row.status_updated_at,createdAt:row.created_at,photoCount:row.photo_count,
    quote:row.quote_amount_minor?{amountMinor:row.quote_amount_minor,currency:'BYN',note:row.quote_note,revision:row.quote_revision}:null,
    customerNote:row.customer_note||'',customerVisibility:row.customer_visibility||'active',history:events.filter(e=>e.order_id===row.id).map(e=>({status:e.status,at:e.changed_at})).reverse()
   }}
@@ -151,7 +151,7 @@ export function createStatusService({telegram,stmt,fail}){
     const button={text:'Посмотреть предложение'};
     if(env.MINI_APP_URL){const url=new URL(env.MINI_APP_URL);url.searchParams.set('order',row.id);button.web_app={url:url.href}}
     else button.url=`https://t.me/${env.BOT_USERNAME}?startapp=order_${row.id}`;
-    notice={chat_id:row.user_id,text:`Расчёт готов: ${money(quote.amount)}${quote.note?'\n'+quote.note:''}\nПосмотрите предложение в приложении — можно согласиться или уточнить условия.`,reply_markup:{inline_keyboard:[[button]]}};
+    notice={_quoteRevision:row.quote_revision+1,chat_id:row.user_id,text:`Предложение по заявке ${row.id} обновлено. Актуальная стоимость и условия – в приложении. Можно согласиться или задать вопрос.`,reply_markup:{inline_keyboard:[[button]]}};
    }
    const changes=await env.DB.batch([
     stmt(env,"INSERT OR IGNORE INTO order_status_events(event_id,order_id,status,actor_id,changed_at) SELECT ?,id,'quoted',?,? FROM orders WHERE id=? AND business_version=?",eventId,String(message.from.id),now,row.id,row.business_version),
@@ -175,14 +175,15 @@ export function createStatusService({telegram,stmt,fail}){
    const old=await stmt(env,'SELECT * FROM order_status_events WHERE event_id=?',eventId).first();
    if(old&&(old.order_id!==row.id||old.status!==target))fail(409,'DECISION','Это действие уже использовано.');
    if(!old){
-    if(row.business_status!=='quoted'||!row.quote_amount_minor||row.business_version!==data.version)fail(409,'QUOTE_CHANGED','Предложение изменилось. Обновите заявку и посмотрите актуальную цену.');
+    if(data.action==='discuss'&&!note)fail(400,'DECISION','Напишите, что хотите уточнить.');
+    if(!(data.action==='accept'?['quoted','discussion'].includes(row.business_status):row.business_status==='quoted')||!row.quote_amount_minor||row.business_version!==data.version)fail(409,'QUOTE_CHANGED','Предложение изменилось. Обновите заявку и посмотрите актуальную цену.');
     const now=Date.now(),payload=JSON.parse(row.payload),username=/^[A-Za-z0-9_]{5,32}$/.test(user.username||'')?user.username:'';
     const contact=`\n\nТелефон: ${payload.phone}${username?'\nTelegram: @'+username:''}`;
     const text=data.action==='accept'?`Клиент принял стоимость ${money(row.quote_amount_minor)} по заявке ${row.id}.\nСвяжитесь с ним для согласования времени.`:`Клиент просит уточнить условия по заявке ${row.id}.${note?'\n'+note:''}`;
     const notice={chat_id:env.TELEGRAM_CHAT_ID,text:text+contact,reply_parameters:{message_id:row.message_id},reply_markup:{inline_keyboard:[[{text:'Написать клиенту в Telegram',url:username?'https://t.me/'+username:'tg://user?id='+row.user_id}]]}};
     const changes=await env.DB.batch([
-     stmt(env,"INSERT OR IGNORE INTO order_status_events(event_id,order_id,status,actor_id,changed_at) SELECT ?,id,?,?,? FROM orders WHERE id=? AND user_id=? AND business_version=? AND business_status='quoted'",eventId,target,String(user.id),now,row.id,String(user.id),data.version),
-     stmt(env,"UPDATE orders SET business_status=?,business_version=business_version+1,status_updated_at=?,customer_note=? WHERE id=? AND user_id=? AND business_version=? AND business_status='quoted' AND EXISTS(SELECT 1 FROM order_status_events WHERE event_id=? AND order_id=orders.id AND status=?)",target,now,note,row.id,String(user.id),data.version,eventId,target),
+     stmt(env,"INSERT OR IGNORE INTO order_status_events(event_id,order_id,status,actor_id,changed_at) SELECT ?,id,?,?,? FROM orders WHERE id=? AND user_id=? AND business_version=? AND business_status=?",eventId,target,String(user.id),now,row.id,String(user.id),data.version,row.business_status),
+     stmt(env,"UPDATE orders SET business_status=?,business_version=business_version+1,status_updated_at=?,customer_note=? WHERE id=? AND user_id=? AND business_version=? AND business_status=? AND EXISTS(SELECT 1 FROM order_status_events WHERE event_id=? AND order_id=orders.id AND status=?)",target,now,note,row.id,String(user.id),data.version,row.business_status,eventId,target),
      outbox.enqueue(env,eventId,row.id,'edit',{},now),
      outbox.enqueue(env,eventId,row.id,'sendMessage',notice,now)
     ]);
@@ -207,7 +208,7 @@ export function createStatusService({telegram,stmt,fail}){
      stmt(env,"INSERT OR IGNORE INTO order_status_events(event_id,order_id,status,actor_id,changed_at) SELECT ?,id,'cancelled',?,? FROM orders WHERE id=? AND user_id=? AND business_version=?",eventId,String(user.id),now,row.id,String(user.id),data.version),
      stmt(env,"UPDATE orders SET business_status='cancelled',business_version=business_version+1,status_updated_at=?,customer_visibility=CASE WHEN customer_visibility='deleted' THEN 'deleted' ELSE 'archived' END WHERE id=? AND user_id=? AND business_version=? AND EXISTS(SELECT 1 FROM order_status_events WHERE event_id=? AND order_id=orders.id)",now,row.id,String(user.id),data.version,eventId),
      outbox.enqueue(env,eventId,row.id,'edit',{},now),
-     outbox.enqueue(env,eventId,row.id,'sendMessage',{chat_id:env.TELEGRAM_CHAT_ID,text:'Клиент отменил запрос на оценку '+row.id+'.',reply_parameters:{message_id:row.message_id}},now)
+     outbox.enqueue(env,eventId,row.id,'sendMessage',{chat_id:env.TELEGRAM_CHAT_ID,text:'Клиент отменил заявку '+row.id+'.',reply_parameters:{message_id:row.message_id}},now)
     ]);
     if(!changes[1].meta.changes)fail(409,'STALE','Заявка уже обновилась.');
     row=await stmt(env,'SELECT * FROM orders WHERE id=?',row.id).first();
@@ -271,7 +272,7 @@ export function createStatusService({telegram,stmt,fail}){
      return {ok:true};
     }
     if(['ask_cancel','back'].includes(action)){
-      try{await edit(env,row,q.message,action==='ask_cancel');await answer(action==='ask_cancel'?'Подтвердите отмену заказа.':'')}catch{await answer('Не удалось обновить кнопки. Повторите попытку.')}
+      try{await edit(env,row,q.message,action==='ask_cancel');await answer(action==='ask_cancel'?'Подтвердите отмену заявки.':'')}catch{await answer('Не удалось обновить кнопки. Повторите попытку.')}
       return {ok:true};
     }
     const permitted=(action==='processing'&&row.business_status==='received')||(action==='cancelled'&&!terminal.has(row.business_status));

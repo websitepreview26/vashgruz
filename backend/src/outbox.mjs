@@ -32,6 +32,14 @@ export function createOutbox({stmt,telegram,edit,sendManagerControls}){
      if(row?.state==='sent')await edit(env,row);
     }else{
      const params=JSON.parse(task.payload),form=new FormData();
+     if(params._quoteRevision!==undefined||task.id.startsWith('quote:')){
+      const row=await stmt(env,'SELECT * FROM orders WHERE id=?',task.order_id).first();
+      const event=params._quoteRevision===undefined?await stmt(env,"SELECT event_id FROM order_status_events WHERE order_id=? AND status='quoted' ORDER BY rowid DESC LIMIT 1",task.order_id).first():null;
+      const current=row?.business_status==='quoted'&&(params._quoteRevision!==undefined?row.quote_revision===params._quoteRevision:event?.event_id+':sendMessage'===task.id);
+      if(!current){await stmt(env,"UPDATE delivery_outbox SET state='superseded',last_error='',lease_token='' WHERE id=? AND lease_token=?",task.id,token).run();continue}
+      params.text=`Предложение по заявке ${row.id} обновлено. Актуальная стоимость и условия – в приложении. Можно согласиться или задать вопрос.`;
+      delete params._quoteRevision;
+     }
      for(const [k,v] of Object.entries(params))form.set(k,typeof v==='object'?JSON.stringify(v):String(v));
      try{await telegram(env,'sendMessage',form)}catch(e){
       if(e.code==='DELIVERY'&&e.telegramCode===400&&form.has('reply_markup')){form.delete('reply_markup');await telegram(env,'sendMessage',form)}else throw e;

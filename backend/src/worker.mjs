@@ -33,7 +33,7 @@ export async function validateInitData(raw,token,now=Math.floor(Date.now()/1000)
   if(!user||!Number.isSafeInteger(user.id)||user.id<=0)fail(401,'AUTH','Не удалось подтвердить пользователя Telegram.');
   return user;
 }
-export function validateOrder(raw){
+export function validateOrder(raw,clock=new Date()){
   if(!raw||typeof raw!=='object'||Array.isArray(raw))fail(400,'ORDER','Проверьте данные заявки.');
   const text=(key,max,required=false)=>{
     const v=raw[key];
@@ -67,13 +67,18 @@ export function validateOrder(raw){
     if(w[lift]===true&&value!==null)w[key]=value;
   }
   if(!Number.isInteger(raw.slot)||raw.slot<0||raw.slot>4)fail(400,'ORDER','Проверьте время.');w.slot=raw.slot;
-  const date=text('date',10),today=new Date().toLocaleDateString('en-CA',{timeZone:'Europe/Minsk'});
+  const date=text('date',10),today=clock.toLocaleDateString('en-CA',{timeZone:'Europe/Minsk'});
   if(date&&(!/^\d{4}-\d{2}-\d{2}$/.test(date)||Number.isNaN(Date.parse(date+'T12:00:00Z'))||new Date(date+'T12:00:00Z').toISOString().slice(0,10)!==date||date<today))fail(400,'ORDER','Выберите сегодняшнюю или будущую дату.');
   w.date=date;
   if(w.slot===4){
     const from=text('customTimeFrom',5),to=text('customTimeTo',5),valid=value=>/^([01]\d|2[0-3]):[0-5]\d$/.test(value);
     if(!date||!valid(from)||(to&&(!valid(to)||to<=from)))fail(400,'ORDER','Укажите дату и корректный промежуток времени.');
     w.customTimeFrom=from;w.customTimeTo=to;
+  }
+  if(date===today&&w.slot>0){
+    const now=clock.toLocaleTimeString('en-GB',{timeZone:'Europe/Minsk',hour:'2-digit',minute:'2-digit',hour12:false});
+    const end=w.slot===4?(w.customTimeTo||w.customTimeFrom):['','12:00','17:00','21:00'][w.slot];
+    if(end<=now)fail(400,'ORDER','Выбранное время сегодня уже прошло. Выберите другое время или дату.');
   }
   return w;
 }
@@ -129,7 +134,7 @@ const bodyFor=env=>{const form=new FormData();form.set('chat_id',env.TELEGRAM_CH
 const stmt=(env,sql,...args)=>env.DB.prepare(sql).bind(...args);
 const statusService=createStatusService({telegram,stmt,fail});
 const receipt=row=>({ok:true,id:row.id,photoCount:row.photo_count,businessStatus:row.business_status||'received',statusUpdatedAt:row.status_updated_at||row.updated_at});
-async function dispatch(env,row,w,user,photos){
+async function dispatch(env,row,w,user,photos,remainingOnly=false){
   if(row.state==='sent'){await statusService.ensureMediaButtons(env,row);await statusService.received(env,row.id);return receipt(row)}
   if(['sending_text','sending_photos','uncertain'].includes(row.state))fail(409,'UNCERTAIN','Эта заявка уже отправляется или требует проверки доставки. Не создавайте её повторно.');
   let state=row.state,messageId=row.message_id;
@@ -158,7 +163,7 @@ async function dispatch(env,row,w,user,photos){
   }
   // Resume only the remaining photos after a confirmed cover card (or legacy text card).
   if(state==='text_sent'){
-    const remaining=row.message_kind==='photo'?photos.slice(1):photos;
+    const remaining=remainingOnly?photos:row.message_kind==='photo'?photos.slice(1):photos;
     if(row.delivery_next_at>Date.now()||row.delivery_attempts>=5)fail(429,'RATE','Повторная отправка фото временно ограничена.');
     await consumeLimit(env,'delivery:user:'+row.user_id,20,3600000,rateError);
     const lock=await stmt(env,"UPDATE orders SET state='sending_photos',delivery_attempts=delivery_attempts+1,updated_at=? WHERE id=? AND state='text_sent' AND delivery_next_at<=? AND delivery_attempts<5 AND fingerprint=?",Date.now(),row.id,Date.now(),row.fingerprint).run();
@@ -215,6 +220,16 @@ export default {
       if(form.has('initData')&&form.get('initData')!==signed)fail(401,'AUTH','Откройте приложение заново через Telegram.');
       const requestId=form.get('requestId');
       if(typeof requestId!=='string'||!/^[a-zA-Z0-9_-]{16,80}$/.test(requestId))fail(400,'ID','Неверный номер запроса.');
+      if(form.get('photoMode')==='remaining'){
+        const existing=await stmt(env,'SELECT * FROM orders WHERE user_id=? AND request_id=?',String(user.id),requestId).first();
+        if(!existing)fail(404,'NOT_FOUND','Заявка не найдена.');
+        if(existing.state==='sent')return json(receipt(existing));
+        if(existing.state!=='text_sent'||!existing.message_id)fail(409,'UNCERTAIN','Сначала необходимо проверить доставку заявки.');
+        const photos=form.getAll('photos');await validatePhotos(photos);
+        const remaining=existing.photo_count-JSON.parse(existing.photo_file_ids||'[]').length;
+        if(photos.length!==remaining||remaining<1)fail(400,'PHOTOS','Выберите оставшиеся фотографии: '+remaining+'. Первое фото повторно добавлять не нужно.');
+        return json(await dispatch(env,existing,JSON.parse(existing.payload),user,photos,true));
+      }
       let raw;try{raw=JSON.parse(form.get('order'))}catch{fail(400,'ORDER','Не удалось прочитать заявку.')}
       const w=validateOrder(raw),photos=form.getAll('photos');await validatePhotos(photos);
       w.name=String(user.first_name||'').replace(/[\x00-\x1f\x7f]/g,' ').replace(/\s+/g,' ').trim().slice(0,60);

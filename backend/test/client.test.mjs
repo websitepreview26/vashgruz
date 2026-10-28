@@ -11,18 +11,18 @@ class Element {
   focus(){}setAttribute(){}contains(){return false}querySelector(){return new Element()}
 }
 function client({live=false,fetcher,initialOrders}={}){
-  const nodes=new Map(),storage=new Map(),urls=new Set();let counter=0;
+  const nodes=new Map(),storage=new Map(),urls=new Set(),listeners={};let counter=0;
   if(initialOrders)storage.set('vg-requests-v2',JSON.stringify(initialOrders.map(o=>({ownerId:live?'42':'local',...o}))));
   const node=k=>{if(!nodes.has(k))nodes.set(k,new Element());return nodes.get(k)};
   const tg={initData:'signed-test-data',platform:'ios',colorScheme:'light',initDataUnsafe:{user:{id:42,first_name:'Тест'}},ready(){},expand(){},disableVerticalSwipes(){},setHeaderColor(){},setBackgroundColor(){},setBottomBarColor(){},onEvent(){},MainButton:{hide(){}},BackButton:{onClick(){},hide(){},show(){}},HapticFeedback:{selectionChanged(){},notificationOccurred(){}}};
-  const doc={querySelector:node,querySelectorAll:()=>[],addEventListener(){},documentElement:{dataset:{},style:{setProperty(){}},classList:{add(){}}},createElement(name){
+  const doc={querySelector:node,querySelectorAll:()=>[],addEventListener(key,fn){(listeners[key]??=[]).push(fn)},documentElement:{dataset:{},style:{setProperty(){}},classList:{add(){}}},createElement(name){
     if(name==='canvas')return {width:0,height:0,getContext:()=>({fillRect(){},drawImage(){}}),toDataURL:()=> 'data:image/jpeg;base64,preview',toBlob:cb=>cb(new Blob([new Uint8Array([255,216,255,224,255,217])],{type:'image/jpeg'}))};
     return new Element();
   }};
   class FakeImage{naturalWidth=3000;naturalHeight=2000;set src(v){this.onload()}}
   const context={window:{VG_CONFIG:{apiBase:live?'https://api.example':''},...(live?{Telegram:{WebApp:tg}}:{}),addEventListener(){}},document:doc,matchMedia:()=>({matches:false}),localStorage:{getItem:k=>storage.get(k)||null,setItem:(k,v)=>storage.set(k,v)},crypto,FormData,Blob,File,FileReader:class{readAsDataURL(){this.result='data:image/jpeg;base64,original';this.onload()}},Image:FakeImage,AbortController,AbortSignal,Date,setTimeout,clearTimeout,requestAnimationFrame:()=>0,cancelAnimationFrame(){},performance,fetch:(url,opts)=>url.endsWith('/api/contact')?Promise.resolve(Response.json({ok:true,phone:''})):fetcher(url,opts),URL:{createObjectURL(){const u='blob:test-'+(++counter);urls.add(u);return u},revokeObjectURL:u=>urls.delete(u)}};
   vm.createContext(context);vm.runInContext(script,context);
-  return {run:s=>vm.runInContext(s,context),node,storage,context,urls,tg};
+  return {run:s=>vm.runInContext(s,context),node,storage,context,urls,tg,click(action,value){const button={dataset:{a:action,v:value}};return listeners.click[0]({target:{closest:()=>button}})}};
 }
 test('photo preparation, five-photo limit and session-only drafts',async()=>{
   const c=client();c.run("S.w=newW('trash');render()");
@@ -373,4 +373,32 @@ test('new requests default to today without creating an empty draft or overridin
  c.run('storeDraft()');assert.equal(c.run('S.orders.length'),0);
  c.run("S.w={...newW('trash'),date:'',desc:'Saved draft'};render()");assert.equal(c.run('S.w.date'),'');
  c.run("S.w.date=today();S.w.dateChosen=true;S.w.desc='';storeDraft()");assert.equal(c.run('S.orders.length'),1);
+});
+
+test('audit fix: date and preset time clicks immediately persist to the draft',()=>{
+ const c=client();c.run("S.w=newW('trash');S.w.addr='Test address';S.step=1;storeDraft();render()");
+ const selected=c.run('iso(plus(2))');c.click('day',selected);c.click('slot','2');
+ let stored=JSON.parse(c.storage.get(c.run('ORDER_STORAGE_KEY')))[0];assert.equal(stored.date,selected);assert.equal(stored.slot,2);
+ c.click('day','');stored=JSON.parse(c.storage.get(c.run('ORDER_STORAGE_KEY')))[0];assert.equal(stored.date,'');assert.equal(stored.slot,0);
+});
+test('audit fix: discussion retains acceptance and empty questions cannot be sent',async()=>{
+ let sent=0;const c=client({live:true,fetcher:async()=>{sent++;return Response.json({ok:true})}});
+ c.run("S.last={id:'local',serverId:'VG-TEST',status:'sent',businessStatus:'discussion',statusVersion:3,quote:{amountMinor:10000}};S.tab='done';render()");
+ assert.equal(c.node('#go').textContent,'Подходит, согласовать');
+ c.run("S.last.businessStatus='quoted';S.discussing=true;S.discussionText='';render()");assert.equal(c.node('#go').disabled,true);
+ await c.run("decideQuote('discuss')");assert.equal(sent,0);assert.match(c.run('S.decisionError'),/Напишите/);
+});
+test('audit fix: resuming photos submits only the remaining files and retains the saved order',async()=>{
+ let body;const c=client({live:true,fetcher:async(url,opts)=>{body=opts.body;return Response.json({ok:true,id:'VG-TEST',photoCount:3,businessStatus:'received'})}});
+ c.run("S.orders=[{...newW('trash'),ownerId:ORDER_OWNER,id:'local',serverId:'VG-TEST',requestId:'resume-request-long',status:'sent',deliveryState:'text_sent',photoCount:3,remainingPhotoCount:2,deliveryAttempts:2}];retryDelivery('local')");
+ assert.match(c.node('#view').innerHTML,/Дослать фотографии/);assert(!c.node('#view').innerHTML.includes('id="desc"'));assert.equal(c.node('#go').disabled,true);
+ c.context.files=[new File(['image'],'a.jpg',{type:'image/jpeg'}),new File(['image'],'b.jpg',{type:'image/jpeg'})];await c.run('addPhotos(files)');
+ assert.equal(c.run('S.orders[0].status'),'sent');assert.equal(c.run('S.orders[0].photoCount'),3);assert.equal(c.node('#go').disabled,false);
+ await c.run('submitOrder()');assert.equal(body.get('photoMode'),'remaining');assert.equal(body.getAll('photos').length,2);assert.equal(c.run('S.last.photoCount'),3);assert.equal(c.run('S.last.deliveryState'),'sent');
+});
+test('audit fix: Minsk date is independent of the device zone and accepted cancellation uses request wording',()=>{
+ const c=client();c.context.Date=class extends Date{constructor(...args){super(...(args.length?args:['2026-10-29T22:30:00Z']))}static now(){return new Date('2026-10-29T22:30:00Z').getTime()}};
+ assert.equal(c.run('today()'),'2026-10-30');assert.equal(c.run('iso(plus(0))'),'2026-10-30');
+ c.run("S.orders=[{id:'local',serverId:'VG-TEST',status:'sent',businessStatus:'accepted'}];S.orderMenuId='local';S.sheet='order-actions'");
+ assert.match(c.run('orderActionsSheet()'),/Отменить заявку/);assert(!c.run('orderActionsSheet()').includes('Отменить оценку'));
 });

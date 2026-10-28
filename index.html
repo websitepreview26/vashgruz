@@ -233,7 +233,7 @@ body{background:var(--bg)}.app-toolbar{display:flex;align-items:center;justify-c
 .address-group>.error:empty{display:none}
 .date-picker[data-selected=true]{border-color:var(--acc);box-shadow:inset 0 0 0 1px var(--acc);background:color-mix(in srgb,var(--acc) 14%,var(--card))}.date-picker[data-selected=true]>svg:first-child{color:var(--ink)}.date-picker .v small{display:block;font-size:10px;color:var(--mut);margin-bottom:2px}
 .day-unsure{width:auto;min-width:116px;padding:10px 14px;display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:500;white-space:nowrap}
-.time-options{grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin-top:8px}.time-options .slot{flex-direction:column;gap:3px;justify-content:center;min-height:46px;padding:11px 5px;font-size:14px;font-weight:500;border-radius:12px}.custom-time-control{margin-top:16px}.custom-time-control[data-active=true] .fld:has(#customTimeFrom){border-color:var(--acc)}.time-end{margin:10px 4px 0}.time-end summary{font-size:13px;color:var(--mut);cursor:pointer;padding:5px 0}.time-end .field-label{margin-top:10px}.custom-time-control input{width:100%;min-width:0;padding:0 10px;background:transparent;border:0;font:inherit;color:var(--ink)}.time-options .slot[aria-pressed=true]{background:color-mix(in srgb,var(--acc) 12%,var(--card))}
+.time-options{grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin-top:8px}.time-options .slot{flex-direction:column;gap:3px;justify-content:center;min-height:46px;padding:11px 5px;font-size:14px;font-weight:500;border-radius:12px}.custom-time-control{margin-top:16px}.custom-time-control[data-active=true] .fld:has(#customTimeFrom){border-color:var(--acc)}.time-end{margin:10px 4px 0}.time-end summary{font-size:13px;color:var(--mut);cursor:pointer;padding:5px 0}.time-end .field-label{margin-top:10px}.custom-time-control input{width:100%;min-width:0;padding:0 10px;background:transparent;border:0;font:inherit;color:var(--ink)}.time-options .slot:disabled{opacity:.4;cursor:default}.time-options .slot[aria-pressed=true]{background:color-mix(in srgb,var(--acc) 12%,var(--card))}
 .pickup-place{display:flex;gap:8px;margin:12px 0 4px}.pickup-place button,.lift-options button{border:1px solid var(--line);border-radius:10px;padding:10px;background:var(--bg);font-size:13px;color:var(--mut)}.pickup-place button{flex:1}.pickup-place button[aria-pressed=true],.lift-options button[aria-pressed=true]{border-color:var(--acc);background:color-mix(in srgb,var(--acc) 12%,var(--card));color:var(--ink)}
 .lift-options{display:flex;gap:4px}.lift-options button{padding:8px;font-size:12px}.condition-optional{display:block;font-size:10px;color:var(--mut);font-weight:400}
 .quote-question{display:block;margin-top:16px;padding:8px 0;font-size:14px;color:var(--mut);text-decoration:underline;text-underline-offset:3px}
@@ -327,8 +327,11 @@ const SV = [
 const SLOTS = [['Любое','','chat'],['Утро','8:00–12:00','sun'],['День','12:00–17:00','clock'],['Вечер','17:00–21:00','clock'],['Своё время','Указать','clock']];
 const sv = id => SV.find(s => s.id === id) || SV[0];
 const iso = d => d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
-const plus = n => { const d = new Date(); d.setDate(d.getDate()+n); return d; };
-const today = () => iso(new Date());
+const today = () => new Date().toLocaleDateString('en-CA',{timeZone:'Europe/Minsk'});
+const plus = n => { const d = new Date(today()+'T12:00'); d.setDate(d.getDate()+n); return d; };
+const minskTime = () => new Date().toLocaleTimeString('en-GB',{timeZone:'Europe/Minsk',hour:'2-digit',minute:'2-digit',hour12:false});
+const expiredSlot = (w,slot=w.slot) => w.date===today()&&slot>0&&slot<4&&['','12:00','17:00','21:00'][slot]<=minskTime();
+function normalizeDefaultDate(w){if(w?.dateChosen===false&&w.date)w.date=today()}
 const fd = (s, long) => !s ? 'По согласованию' : new Date(s+'T12:00').toLocaleDateString('ru-RU', long ? {weekday:'long', day:'numeric', month:'long'} : {day:'numeric', month:'long'});
 const user = tg && tg.initDataUnsafe && tg.initDataUnsafe.user;
 const API_BASE=String(window.VG_CONFIG?.apiBase||'').replace(/\/$/,'');
@@ -390,7 +393,8 @@ function conditions(prefix,title,showTitle=true){
 }
 
 let photoJob=null;
-function photoCountText(){const n=S.w?.photos?.length||0;return n?'Добавлено: '+n+' из 5':'необязательно · до 5'}
+function photoLimit(){return S.w?.photoResume?S.w.remainingPhotoCount:5}
+function photoCountText(){const n=S.w?.photos?.length||0,limit=photoLimit();return n?'Добавлено: '+n+' из '+limit:S.w?.photoResume?'нужно '+limit:'необязательно · до 5'}
 function photoProgressPanel(){
  const p=S.photoProgress;
  return `<section id="photo-progress" class="photo-progress" ${S.preparing?'':'hidden'} aria-label="Подготовка фотографий"><div class="photo-progress-head"><i class="photo-spinner" aria-hidden="true"></i><div class="photo-progress-copy" aria-live="polite"><b id="photo-progress-title">${p?'Фото '+Math.min(p.done+1,p.total)+' из '+p.total:'Подготавливаем фото'}</b><small id="photo-progress-stage">${esc(p?.stage||'Открываем фото')}</small></div><button class="photo-progress-cancel" data-a="cancel-photos">Отменить</button></div><progress id="photo-progress-bar" value="${p?.done||0}" max="${p?.total||1}" aria-label="Обработано фотографий"></progress><p class="photo-progress-note">Большие фото могут обрабатываться чуть дольше.</p></section>`;
@@ -399,7 +403,7 @@ function photoTiles(){
  const photos=S.w?.photos||[],p=S.photoProgress;
  const ready=photos.map((photo,i)=>`<div class="photo-item"><img src="${photo.url}" alt="Фото ${i+1}"><button data-a="remove-photo" data-v="${i}" aria-label="Удалить фото ${i+1}" ${S.preparing?'disabled':''}>${ic('x')}</button></div>`).join('');
  const pending=S.preparing&&p?Array.from({length:Math.max(0,p.total-p.done)},(_,i)=>`<div class="photo-item photo-pending" aria-hidden="true"><i class="photo-spinner"></i><span>Фото ${p.done+i+1} из ${p.total}</span></div>`).join(''):'';
- return ready+pending+(!S.preparing&&photos.length<5?`<label class="photo-add" for="photo-input" role="button" tabindex="0" aria-disabled="false">${ic('cam')}<span>Добавить</span></label>`:'');
+ return ready+pending+(!S.preparing&&photos.length<photoLimit()?`<label class="photo-add" for="photo-input" role="button" tabindex="0" aria-disabled="false">${ic('cam')}<span>Добавить</span></label>`:'');
 }
 function updatePhotoPreparationUi(grid=false){
  const p=S.photoProgress,panel=$('#photo-progress');if(panel)panel.hidden=!S.preparing;
@@ -427,16 +431,18 @@ function timeText(w){
  const slot=SLOTS[w.slot]||SLOTS[0];return slot[0].toLowerCase()+(slot[1]?' '+slot[1]:' время');
 }
 function customTimeError(w){
+ if(expiredSlot(w))return {slot:'Этот промежуток сегодня уже прошёл. Выберите другой.'};
  if(w.slot!==4)return {};
  if(!w.date)return {date:'Выберите дату для своего времени.'};
  const valid=value=>/^([01]\d|2[0-3]):[0-5]\d$/.test(value||'');
  if(!valid(w.customTimeFrom))return {customTimeFrom:'Укажите время начала.'};
  if(w.customTimeTo&&(!valid(w.customTimeTo)||w.customTimeTo<=w.customTimeFrom))return {customTimeTo:'Окончание должно быть позже начала.'};
+ if(w.date===today()&&(w.customTimeTo||w.customTimeFrom)<=minskTime())return {customTimeFrom:'Это время сегодня уже прошло. Выберите другое.'};
  return {};
 }
 function timeOptions(w){
  const field=(key,label)=>`<label class="field-label" for="${key}">${label}</label><div class="fld ${S.errors[key]?'invalid':''}"><input type="time" id="${key}" data-f="${key}" value="${esc(w[key]||'')}" aria-describedby="err-${key}" aria-invalid="${!!S.errors[key]}"></div>${error(key)}`;
- return `<p class="conditions-title">Удобное время</p><div class="slots time-options" role="group" aria-label="Удобное время">${SLOTS.slice(0,4).map((t,i)=>`<button class="slot" data-a="slot" data-v="${i}" aria-pressed="${i===w.slot}"><span>${t[0]}</span>${t[1]?`<small>${t[1]}</small>`:''}</button>`).join('')}</div><div class="custom-time-control" data-active="${w.slot===4}">${field('customTimeFrom','Своё время')}<details class="time-end" ${w.customTimeTo||S.errors.customTimeTo?'open':''}><summary>Добавить время окончания</summary>${field('customTimeTo','До')}</details></div><p class="hint">Точное время согласуем после оценки.</p>`;
+ return `<p class="conditions-title">Удобное время</p><div class="slots time-options" role="group" aria-label="Удобное время">${SLOTS.slice(0,4).map((t,i)=>`<button class="slot" data-a="slot" data-v="${i}" aria-pressed="${i===w.slot}" ${expiredSlot(w,i)?'disabled title="Этот промежуток сегодня уже прошёл"':''}><span>${t[0]}</span>${t[1]?`<small>${t[1]}</small>`:''}</button>`).join('')}</div>${error('slot')}<div class="custom-time-control" data-active="${w.slot===4}">${field('customTimeFrom','Своё время')}<details class="time-end" ${w.customTimeTo||S.errors.customTimeTo?'open':''}><summary>Добавить время окончания</summary>${field('customTimeTo','До')}</details></div><p class="hint">Точное время согласуем после оценки.</p>`;
 }
 function updateCustomTime(field){
  const w=S.w,key=field.dataset.f;if(!w||!['customTimeFrom','customTimeTo'].includes(key))return;
@@ -447,13 +453,14 @@ function updateCustomTime(field){
  document.querySelectorAll('.time-options [data-a="slot"]').forEach(button=>button.setAttribute('aria-pressed',String(Number(button.dataset.v)===w.slot)));
  const control=$('.custom-time-control');if(control)control.setAttribute('data-active',String(w.slot===4));
 }
+function photoSection(w){return ` <div class="sec"><b>Фото</b><small id="photo-count" role="status">${photoCountText()}</small></div><p class="hint">Помогут точнее оценить стоимость.</p><p class="error" id="photo-error" role="alert">${esc(S.photoError)}</p>${photoProgressPanel()}<div id="photo-grid" class="photo-grid" aria-busy="${S.preparing}">${photoTiles()}</div>`}
 function wizard(){
- const w=S.w,s=sv(w.sv),seg=[0,1,2].map(i=>`<i class="${i<=S.step?'on':''}"></i>`).join('');
+ const w=S.w;normalizeDefaultDate(w);if(w.photoResume)return `<div class="bar"><button data-a="back" aria-label="Назад">${ic('back')}</button></div><div class="hd"><h1>Дослать фотографии</h1><p class="sub">Карточка заявки уже у менеджера. Добавьте только оставшиеся фото: ${w.remainingPhotoCount}. Уже доставленные фото повторно добавлять не нужно.</p></div>${photoSection(w)}<p class="error" role="alert">${esc(S.submitError)}</p>`;const s=sv(w.sv),seg=[0,1,2].map(i=>`<i class="${i<=S.step?'on':''}"></i>`).join('');
  const bar=`<div class="bar"><button id="bk" data-a="back" aria-label="Назад">${ic('back')}</button><div class="seg">${seg}</div></div><p class="step-label">Шаг ${S.step+1} из 3 · ${['Задача','Место и время','Контакт'][S.step]}</p>`;
  if(S.step===0)return bar+`<div class="hd"><h1>${s.q}</h1></div>
  <button class="pill svc selected-service" style="--c:${s.c}" data-a="sheet" data-v="svc"><span class="bg" aria-hidden="true">${ic(s.id)}</span><b>${s.n}</b><em>Изменить</em></button>
  <label class="field-label" for="desc">Описание <span style="font-weight:400;color:var(--mut)">· необязательно</span></label><div class="card input-card"><textarea rows="1" id="desc" class="task-input" data-f="desc" maxlength="1000" aria-describedby="err-desc" aria-invalid="${!!S.errors.desc}" placeholder="${s.ph}">${esc(w.desc)}</textarea></div>${error('desc')}
- <div class="sec"><b>Фото</b><small id="photo-count" role="status">${photoCountText()}</small></div><p class="hint">Помогут точнее оценить стоимость.</p><p class="error" id="photo-error" role="alert">${esc(S.photoError)}</p>${photoProgressPanel()}<div id="photo-grid" class="photo-grid" aria-busy="${S.preparing}">${photoTiles()}</div>`;
+ ${photoSection(w)}`;
  if(S.step===1)return bar+`<div class="hd"><h1>${s.mv?'Откуда и куда?':'Куда приехать?'}</h1><p class="sub">Адрес и удобное время.</p></div>
  <section class="address-group" aria-label="${s.mv?'Точка А':'Место работы'}">${addressField('addr',s.mv?'Точка А — откуда забрать':'Адрес','Улица, дом, город')}${conditions('',s.mv?'В точке А':'Условия на месте',false)}</section>
  ${s.mv?`<section class="address-group" aria-label="Точка Б">${addressField('to','Точка Б — куда привезти','Улица, дом, город')}${conditions('to','В точке Б',false)}</section>`:''}
@@ -473,7 +480,7 @@ const ORDER_STATES={
  received:{title:'Заявка на оценку получена',short:'Получена',text:'Оценим задачу и предложим стоимость. Заказ пока не подтверждён.'},
  processing:{title:'На оценке',text:'Менеджер изучает задачу. Здесь появятся цена и условия.'},
  quoted:{title:'Предложение готово',text:'Посмотрите стоимость и условия. Решение за вами.'},
- discussion:{title:'Уточняем условия',text:'Ваш запрос передан менеджеру. Он свяжется с вами или обновит предложение.'},
+ discussion:{title:'Уточняем условия',text:'Вопрос передан менеджеру. Можно дождаться ответа или принять текущую стоимость.'},
  accepted:{title:'Стоимость принята',text:'Вы согласились с предложением. Менеджер свяжется с вами, чтобы согласовать время и детали.'},
  cancelled:{title:'Заявка закрыта',text:'Оценка закрыта. При необходимости можно отправить новую задачу.'},
  confirmed:{title:'Согласовано ранее',text:'Архивная заявка из предыдущей версии.'},
@@ -483,7 +490,7 @@ const statusOf=o=>ORDER_STATES[o.businessStatus]||ORDER_STATES.received;
 const statusTime=t=>t?new Date(t).toLocaleString('ru-RU',{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'}):'';
 function orderProgress(o){
  const state=o.businessStatus||'received',meta=statusOf(o);
- const keys=['received','processing','quoted','accepted'],current=state==='discussion'?1:keys.indexOf(state);
+ const keys=['received','processing','quoted','accepted'],current=state==='discussion'?2:keys.indexOf(state);
  return `<section class="order-status-panel ${state==='cancelled'?'cancelled':''}"><h2>${meta.title}</h2><p>${meta.text}</p>${['cancelled','confirmed','completed'].includes(state)?'':`<div class="order-progress">${keys.map((key,i)=>{const event=[...(o.history||[])].reverse().find(e=>e.status===key);return `<div class="${i<=current?'reached':''} ${i===current?'current':''}"><i>${i<current?'✓':''}</i><b>${['Получена','На оценке','Предложение','Цена принята'][i]}</b><small>${event?esc(statusTime(event.at)):''}</small></div>`}).join('')}</div>`}<small class="status-updated">${o.statusUpdatedAt?'Обновлено '+esc(statusTime(o.statusUpdatedAt)):''}</small></section>`;
 }
 let statusTimer=null,statusSync=null,lastStatusFetch=0,statusError='',statusLoading=false,orderListEpoch=0,statusPageCount=1,statusNextCursor=null;
@@ -503,12 +510,13 @@ function done(){const o=S.last,sent=o.status==='sent';
 function quoteMoney(minor){return (Number(minor)/100).toLocaleString('ru-RU',{maximumFractionDigits:2})+' BYN'}
 function quoteCard(o){
  if(!o.quote)return '';
- const current=o.businessStatus==='quoted';
- return `<section class="quote-card"><small>${o.businessStatus==='discussion'?'Предыдущее предложение':'Предложение по вашей задаче'}</small><strong>${quoteMoney(o.quote.amountMinor)}</strong>${o.quote.note?`<p class="quote-note">${esc(o.quote.note)}</p>`:''}${current?S.discussing?`<label class="field-label" for="discussion-note">Что хотите уточнить? <span style="font-weight:400;color:var(--mut)">· необязательно</span></label><div class="card input-card"><textarea rows="1" id="discussion-note" data-quote-note maxlength="400" placeholder="Например: можно ли снизить цену, если помогу с погрузкой?">${esc(S.discussionText)}</textarea></div><button class="btn2" data-a="cancel-discussion">Назад к предложению</button>`:`<button class="quote-question" data-a="discuss-quote">Задать вопрос</button>`:''}${S.decisionError?`<p class="error" role="alert">${esc(S.decisionError)}</p>`:''}</section>`;
+ const current=['quoted','discussion'].includes(o.businessStatus);
+ return `<section class="quote-card"><small>Предложение по вашей задаче</small><strong>${quoteMoney(o.quote.amountMinor)}</strong>${o.quote.note?`<p class="quote-note">${esc(o.quote.note)}</p>`:''}${current?S.discussing?`<label class="field-label" for="discussion-note">Что хотите уточнить?</label><div class="card input-card"><textarea rows="1" id="discussion-note" data-quote-note maxlength="400" placeholder="Например: можно ли снизить цену, если помогу с погрузкой?">${esc(S.discussionText)}</textarea></div><button class="btn2" data-a="cancel-discussion">Назад к предложению</button>`:`<button class="quote-question" data-a="discuss-quote" ${o.businessStatus==='discussion'?'hidden':''}>Задать вопрос</button>`:''}${S.decisionError?`<p class="error" role="alert">${esc(S.decisionError)}</p>`:''}</section>`;
 }
 const decisionIds=new Map();
 async function decideQuote(action){
- const o=S.last;if(S.sending||!o?.quote||o.businessStatus!=='quoted')return;
+ const o=S.last;if(S.sending||!o?.quote||!['quoted','discussion'].includes(o.businessStatus))return;
+ if(action==='discuss'&&!S.discussionText.trim()){S.decisionError='Напишите, что хотите уточнить.';return render(true)}
  const version=action==='discuss'?S.discussionVersion:o.statusVersion,key=o.serverId+':'+version+':'+action;
  if(!decisionIds.has(key))decisionIds.set(key,crypto.randomUUID());
  S.sending=true;S.decisionError='';render(true);let changed=false;
@@ -578,9 +586,9 @@ function orderActionsSheet(){
    const description=draft?'Можно будет заполнить новую заявку.':active?'Заявка останется у менеджера. Это не отменит оценку.':'Заявка исчезнет из вашей истории.';
    return `<div class="grab"></div><h3>${title}</h3><p class="hint">${description}</p><p class="error" role="alert">${esc(S.organizeError)}</p><div class="draft-confirm-actions"><button class="sheet-action" data-a="close" ${busy}>Оставить</button><button class="sheet-action danger" data-a="order-organize" data-v="delete" ${busy}>${S.organizing?'Подождите…':draft?'Удалить':'Убрать'}</button></div>`;
   }
-  return `<div class="grab"></div><h3>Отменить оценку?</h3><p class="hint">Менеджер получит уведомление. Заявка появится в истории.</p><p class="error" role="alert">${esc(S.organizeError)}</p><button class="sheet-action danger" data-a="order-organize" data-v="cancel" ${busy}>${S.organizing?'Подождите…':'Отменить оценку'}</button>`;
+  return `<div class="grab"></div><h3>${o.businessStatus==='accepted'?'Отменить заявку?':'Отменить оценку?'}</h3><p class="hint">Менеджер получит уведомление. Заявка появится в истории.</p><p class="error" role="alert">${esc(S.organizeError)}</p><button class="sheet-action danger" data-a="order-organize" data-v="cancel" ${busy}>${S.organizing?'Подождите…':o.businessStatus==='accepted'?'Отменить заявку':'Отменить оценку'}</button>`;
  }
- return `<div class="grab"></div><h3>Заявка № ${esc((o.serverId||o.id).slice(-12))}</h3>${o.serverId&&['received','processing','quoted','discussion','accepted'].includes(o.businessStatus||'received')?`<button class="sheet-action" data-a="order-confirm" data-v="cancel" ${busy}>Отменить оценку</button>`:''}<button class="sheet-action danger" data-a="order-confirm" data-v="delete" ${busy}>Убрать из списка</button><p class="error" role="alert">${esc(S.organizeError)}</p>`;
+ return `<div class="grab"></div><h3>Заявка № ${esc((o.serverId||o.id).slice(-12))}</h3>${o.serverId&&['received','processing','quoted','discussion','accepted'].includes(o.businessStatus||'received')?`<button class="sheet-action" data-a="order-confirm" data-v="cancel" ${busy}>${o.businessStatus==='accepted'?'Отменить заявку':'Отменить оценку'}</button>`:''}<button class="sheet-action danger" data-a="order-confirm" data-v="delete" ${busy}>Убрать из списка</button><p class="error" role="alert">${esc(S.organizeError)}</p>`;
 }
 function sheetCloseButton(){
  const deletion=S.sheet==='order-confirm'&&S.orderConfirmAction==='delete'&&S.orders.some(o=>o.id===S.orderMenuId);
@@ -661,7 +669,7 @@ function close(){
  else $('#view').focus({preventScroll:true});
  sheetFocus=null;
 }
-function validate(){const w=S.w,e={};if(S.step===1){if(w.addr.trim().length<5)e.addr='Укажите улицу, дом и населённый пункт.';if(sv(w.sv).mv&&w.to.trim().length<5)e.to='Укажите адрес выгрузки.';if(w.date&&w.date<today())e.date='Выберите сегодняшнюю или будущую дату.';Object.assign(e,customTimeError(w))}if(S.step===2){const digits=w.phone.replace(/\D/g,'');if(!/^(?:375\d{9}|80\d{9})$/.test(digits))e.phone='Введите номер: +375 и 9 цифр, либо 8 0 и 9 цифр.'}return e}
+function validate(step=S.step){const w=S.w,e={};if(step===1){if(w.addr.trim().length<5)e.addr='Укажите улицу, дом и населённый пункт.';if(sv(w.sv).mv&&w.to.trim().length<5)e.to='Укажите адрес выгрузки.';if(w.date&&w.date<today())e.date='Выберите сегодняшнюю или будущую дату.';Object.assign(e,customTimeError(w))}if(step===2){const digits=w.phone.replace(/\D/g,'');if(!/^(?:375\d{9}|80\d{9})$/.test(digits))e.phone='Введите номер: +375 и 9 цифр, либо 8 0 и 9 цифр.'}return e}
 function cachedPhone(){try{return localStorage.getItem(PHONE_STORAGE_KEY)||''}catch{return ''}}
 function cachePhone(phone){try{if(validPhone(phone))localStorage.setItem(PHONE_STORAGE_KEY,phone)}catch{}}
 function validPhone(phone){return /^\+?[1-9]\d{8,14}$/.test(String(phone||'').replace(/[\s()-]/g,''))}
@@ -709,9 +717,10 @@ async function requestPhone(){
  finally{S.contactBusy=false;if(S.w)render(true)}
 }
 function missingAddress(){if(!S.w||S.step!==1)return '';if(S.w.addr.trim().length<5)return sv(S.w.sv).mv?'Укажите адрес точки А':'Укажите адрес';if(sv(S.w.sv).mv&&S.w.to.trim().length<5)return 'Укажите адрес точки Б';return ''}
-function refresh(){if(S.w){const missing=missingAddress(),needsPhone=S.step===2&&!validPhone(S.w.phone);$('#go').disabled=S.sending||S.preparing||S.contactBusy||!!missing||needsPhone;$('#go').textContent=S.sending?'Отправляем…':S.preparing?'Подготавливаем фото…':S.contactBusy?'Ожидаем номер…':missing|| (needsPhone?'Укажите номер':S.step===2?'Получить оценку':S.step===0?'Далее: адрес':'Далее: контакт')}}
+function refresh(){if(S.w){if(S.w.photoResume){$('#go').disabled=S.sending||S.preparing||S.w.photos.length!==S.w.remainingPhotoCount;$('#go').textContent=S.sending?'Отправляем…':S.preparing?'Подготавливаем фото…':'Дослать фото';return}const missing=missingAddress(),needsPhone=S.step===2&&!validPhone(S.w.phone);$('#go').disabled=S.sending||S.preparing||S.contactBusy||!!missing||needsPhone;$('#go').textContent=S.sending?'Отправляем…':S.preparing?'Подготавливаем фото…':S.contactBusy?'Ожидаем номер…':missing|| (needsPhone?'Укажите номер':S.step===2?'Получить оценку':S.step===0?'Далее: адрес':'Далее: контакт')}}
 function storeDraft(status='draft'){
  const w=S.w;if(!w)return null;
+ if(w.photoResume)return S.orders.find(o=>o.id===w.id)||null;
  const photos=w.photos||[];w.photoCount=photos.length;
  if(status==='draft'&&!hasDraftContent(w)){
   if(w.id){S.orders=S.orders.filter(o=>o.id!==w.id||o.status==='sent');photoCache.delete(w.id);save()}
@@ -726,23 +735,25 @@ function storeDraft(status='draft'){
 }
 function retryDelivery(id){
  const o=S.orders.find(x=>x.id===id&&ownsOrder(x));if(!o||!['received','text_sent'].includes(o.deliveryState)||o.deliveryAttempts>=5)return;
- S.w={...newW(o.sv),...o,submitId:o.requestId||o.submitId,photos:photoCache.get(o.id)||[]};S.step=0;S.errors={};S.submitError='';S.photoError=o.photoCount&&!S.w.photos.length?'Фото нужно выбрать заново.':'';S.tab='home';render();
+ S.w={...newW(o.sv),...o,submitId:o.requestId||o.submitId,photos:o.deliveryState==='text_sent'?[]:photoCache.get(o.id)||[],photoResume:o.deliveryState==='text_sent',remainingPhotoCount:o.remainingPhotoCount||o.photoCount};S.step=0;S.errors={};S.submitError='';S.photoError=o.photoCount&&!S.w.photos.length?'Фото нужно выбрать заново.':'';S.tab='home';render();
 }
 async function submitOrder(){
  const w=S.w;if(!w||S.sending||S.preparing||S.contactBusy)return;
+ if(!w.photoResume){normalizeDefaultDate(w);const errors={...validate(1),...validate(2)};if(Object.keys(errors).length){S.errors=errors;S.step=Object.keys(validate(1)).length?1:2;return render()}}
  if(!API_BASE){const o=storeDraft('demo');S.last=o;S.w=null;S.tab='done';S.anim='af';return render()}
  if(!inTg||!tg.initData){S.submitError='Для отправки откройте мини-приложение через бота в Telegram.';return render()}
  w.submitId=w.submitId||crypto.randomUUID();storeDraft();
  S.sending=true;S.submitError='';render();
  try{
   const form=new FormData();form.set('requestId',w.submitId);form.set('initData',tg.initData);
+  if(w.photoResume)form.set('photoMode','remaining');
   const payload={};for(const key of ['sv','desc','addr','to','floor','toFloor','lift','toLift','liftType','toLiftType','liftFirstFloor','toLiftFirstFloor','location','dis','date','slot','customTimeFrom','customTimeTo','name','phone'])payload[key]=w[key];
   form.set('order',JSON.stringify(payload));
   for(const [i,p] of (w.photos||[]).entries())form.append('photos',p.blob,`photo-${i+1}.jpg`);
   const response=await fetch(API_BASE+'/api/orders',{method:'POST',headers:{'X-Telegram-Init-Data':tg.initData},body:form,signal:AbortSignal.timeout(90000)});
   const result=await response.json();
   if(!response.ok||!result.ok)throw Object.assign(new Error(result.message||'Не удалось отправить. Попробуйте ещё раз.'),{code:result.code});
-  cachePhone(w.phone);const o=storeDraft('sent');o.serverId=result.id;o.businessStatus=result.businessStatus||'received';o.statusUpdatedAt=result.statusUpdatedAt||Date.now();lastStatusFetch=0;save();
+  cachePhone(w.phone);const o=storeDraft('sent');if(w.photoResume){o.photoCount=result.photoCount;o.photoResume=false;o.remainingPhotoCount=0;o.deliveryState='sent'}o.serverId=result.id;o.businessStatus=result.businessStatus||'received';o.statusUpdatedAt=result.statusUpdatedAt||Date.now();lastStatusFetch=0;save();
   S.last=o;S.w=null;S.tab='done';S.anim='af';hap('success');
  }catch(e){
   let recovered=null;
@@ -758,7 +769,8 @@ async function submitOrder(){
 }
 $('#go').onclick=()=>{
  if(S.sending||S.preparing||S.contactBusy)return;
- if(!S.w){if(S.tab==='done'&&S.last?.businessStatus==='quoted')return decideQuote(S.discussing?'discuss':'accept');if(S.tab==='done'){S.tab='orders';render()}return}
+ if(!S.w){if(S.tab==='done'&&['quoted','discussion'].includes(S.last?.businessStatus))return decideQuote(S.discussing?'discuss':'accept');if(S.tab==='done'){S.tab='orders';render()}return}
+ if(S.w.photoResume)return submitOrder();
  S.errors=validate();if(Object.keys(S.errors).length){render();const first=Object.keys(S.errors)[0];$('#'+first)?.focus();return}
  hap();if(S.step<2){storeDraft();S.step++;S.anim='af';return render()}return submitOrder();
 };
@@ -835,8 +847,8 @@ async function compressPhoto(file,{signal,onStage}={}){
 }
 async function addPhotos(files){
  const w=S.w;if(!w||S.preparing)return;
- w.photos=w.photos||[];const incoming=Array.from(files),available=5-w.photos.length,selected=incoming.slice(0,available);
- S.photoError=incoming.length>available?'Можно добавить до 5 фотографий.':'';
+ w.photos=w.photos||[];const incoming=Array.from(files),available=photoLimit()-w.photos.length,selected=incoming.slice(0,available);
+ S.photoError=incoming.length>available?'Можно добавить до '+photoLimit()+' фотографий.':'';
  if(!selected.length){render(true);return}
  const job={w,controller:new AbortController(),progress:{total:selected.length,done:0,stage:'Открываем фото'}};
  const active=()=>photoJob===job&&!job.controller.signal.aborted&&S.w===w;
@@ -870,7 +882,7 @@ function fitTextarea(field){
 }
 function fitTextareas(){document.querySelectorAll('#view .input-card textarea').forEach(fitTextarea)}
 window.addEventListener('resize',()=>requestAnimationFrame(fitTextareas));
-function render(preserve=false){edgeBack.cancel();const oldScroll=$('#view').scrollTop;const wiz=!!S.w,v=$('#view');const active=document.activeElement;if(active&&v.contains(active)&&active.matches('input,textarea,select'))active.blur();v.className=S.anim;S.anim='';v.innerHTML=wiz?wizard():({home,orders,done}[S.tab]||home)();fitTextareas();v.scrollTop=preserve?oldScroll:0;if(!preserve)v.focus({preventScroll:true});$('#dock').hidden=!wiz&&S.tab!=='done';$('#tabs').hidden=wiz||S.tab==='done';if(!wiz&&S.tab==='done'){$('#go').disabled=S.sending;$('#go').textContent=S.sending?'Отправляем…':S.last?.businessStatus==='quoted'?(S.discussing?'Отправить вопрос':'Подходит, согласовать'):'Мои заявки';}document.querySelectorAll('#tabs button').forEach(b=>b.setAttribute('aria-current',b.dataset.v===S.tab));if(inTg)(wiz||S.tab==='done')?tg.BackButton.show():tg.BackButton.hide();if(wiz)refresh();$('#view').inert=S.sending;scheduleStatuses()}
+function render(preserve=false){edgeBack.cancel();const oldScroll=$('#view').scrollTop;const wiz=!!S.w,v=$('#view');const active=document.activeElement;if(active&&v.contains(active)&&active.matches('input,textarea,select'))active.blur();v.className=S.anim;S.anim='';v.innerHTML=wiz?wizard():({home,orders,done}[S.tab]||home)();fitTextareas();v.scrollTop=preserve?oldScroll:0;if(!preserve)v.focus({preventScroll:true});$('#dock').hidden=!wiz&&S.tab!=='done';$('#tabs').hidden=wiz||S.tab==='done';if(!wiz&&S.tab==='done'){$('#go').disabled=S.sending||(S.discussing&&!S.discussionText.trim());$('#go').textContent=S.sending?'Отправляем…':['quoted','discussion'].includes(S.last?.businessStatus)?(S.discussing?'Отправить вопрос':'Подходит, согласовать'):'Мои заявки';}document.querySelectorAll('#tabs button').forEach(b=>b.setAttribute('aria-current',b.dataset.v===S.tab));if(inTg)(wiz||S.tab==='done')?tg.BackButton.show():tg.BackButton.hide();if(wiz)refresh();$('#view').inert=S.sending;scheduleStatuses()}
 const keep=fn=>{const y=$('#view').scrollTop;fn();render();$('#view').scrollTop=y};
 document.addEventListener('click',e=>{const b=e.target.closest('[data-a]');if(!b)return;const a=b.dataset.a,v=b.dataset.v,k=b.dataset.k,w=S.w;if(a==='cancel-photos')return cancelPhotoPreparation();if(a==='back'&&S.preparing)return back();if(S.sending||S.preparing||S.organizing)return;hap();
  if(a==='discuss-quote'){S.discussing=true;S.discussionText='';S.discussionVersion=S.last.statusVersion;S.decisionError='';return render(true)}
@@ -904,8 +916,8 @@ document.addEventListener('click',e=>{const b=e.target.closest('[data-a]');if(!b
  if(a==='lift-detail'){w[k]=w[k]===v?null:v;storeDraft();return keep(()=>{})}
  if(a==='lift-choice'){const selected=v==='true';w[k]=w[k]===selected?null:selected;if(w[k]!==true){w[k==='toLift'?'toLiftType':'liftType']=null;w[k==='toLift'?'toLiftFirstFloor':'liftFirstFloor']=null}storeDraft();return keep(()=>{})}
  if(a==='pick'){if(sv(v).hidden)return;w.sv=v;if(!isRemoval(v))w.location=null;S.errors={};close();return keep(()=>{})}
- if(a==='pickd'){w.date=v;w.dateChosen=true;close();return keep(()=>{})}
- keep(()=>{if(a==='slot'){w.slot=+v;w.customTimeFrom='';w.customTimeTo='';delete S.errors.customTimeFrom;delete S.errors.customTimeTo;}if(a==='tgl')w[k]=!w[k];if(a==='day'){w.date=v;w.dateChosen=true;if(!v){w.slot=0;w.customTimeFrom='';w.customTimeTo='';delete S.errors.customTimeFrom;delete S.errors.customTimeTo;}}})
+ if(a==='pickd'){w.date=v;w.dateChosen=true;S.errors={};storeDraft();close();return keep(()=>{})}
+ keep(()=>{if(a==='slot'){if(expiredSlot(w,+v))return;delete S.errors.slot;w.slot=+v;w.customTimeFrom='';w.customTimeTo='';delete S.errors.customTimeFrom;delete S.errors.customTimeTo;}if(a==='tgl')w[k]=!w[k];if(a==='day'){w.date=v;w.dateChosen=true;S.errors={};if(!v){w.slot=0;w.customTimeFrom='';w.customTimeTo='';delete S.errors.customTimeFrom;delete S.errors.customTimeTo;}}storeDraft()})
 });
 // Render the previous screen without changing the live form or its data.
 function backPreview(){
@@ -1011,7 +1023,7 @@ $('#photo-input').addEventListener('change',e=>{
 });
 document.addEventListener('click',e=>{if(e.target.closest('.photo-add')&&(S.preparing||S.sending))e.preventDefault()},true);
 document.addEventListener('keydown',e=>{if((e.key==='Enter'||e.key===' ')&&e.target.matches('.photo-add')&&!S.preparing&&!S.sending){e.preventDefault();$('#photo-input').click()}});
-document.addEventListener('input',e=>{if(e.target.tagName==='TEXTAREA')fitTextarea(e.target);if(e.target.hasAttribute('data-quote-note')){S.discussionText=e.target.value;return}const f=e.target.dataset.f;if(f&&S.w){if(['customTimeFrom','customTimeTo'].includes(f))updateCustomTime(e.target);else S.w[f]=e.target.value;storeDraft();if(S.errors[f]){delete S.errors[f];$('#err-'+f).textContent='';e.target.setAttribute('aria-invalid','false');e.target.closest('.fld')?.classList.remove('invalid')}refresh()}});
+document.addEventListener('input',e=>{if(e.target.tagName==='TEXTAREA')fitTextarea(e.target);if(e.target.hasAttribute('data-quote-note')){S.discussionText=e.target.value;$('#go').disabled=S.sending||!S.discussionText.trim();return}const f=e.target.dataset.f;if(f&&S.w){if(['customTimeFrom','customTimeTo'].includes(f))updateCustomTime(e.target);else S.w[f]=e.target.value;storeDraft();if(S.errors[f]){delete S.errors[f];$('#err-'+f).textContent='';e.target.setAttribute('aria-invalid','false');e.target.closest('.fld')?.classList.remove('invalid')}refresh()}});
 document.addEventListener('keydown',e=>{if(!S.sheet)return;if(e.key==='Escape')return close();if(e.key==='Tab'){const items=[...document.querySelectorAll('#sheet button:not(:disabled), #sheet a')];const first=items[0],last=items[items.length-1];if(e.shiftKey&&document.activeElement===first){e.preventDefault();last.focus()}else if(!e.shiftKey&&document.activeElement===last){e.preventDefault();first.focus()}}});
 document.addEventListener('visibilitychange',()=>{if(!document.hidden)lastStatusFetch=0;scheduleStatuses()});
 if(inTg)tg.onEvent('activated',()=>{lastStatusFetch=0;scheduleStatuses()});
