@@ -67,7 +67,7 @@ textarea{width:100%;display:block;min-height:76px;padding:12px 0;border:0;backgr
 .days{display:flex;gap:8px;overflow-x:auto;scrollbar-width:none;margin:0 -16px 12px;padding:2px 16px 4px}.days::-webkit-scrollbar{display:none}
 .day{flex:none;width:58px;padding:10px 0;border-radius:18px;background:var(--card);box-shadow:var(--sh);text-align:center;line-height:1.15;border:2px solid transparent}
 .day small{display:block;color:var(--mut);font-size:12px}.day b{font-size:21px}
-.day[aria-pressed=true]{background:var(--navy);color:#fff}.day[aria-pressed=true] small{color:var(--acc)}
+.day[aria-pressed=true]{background:color-mix(in srgb,var(--acc) 14%,var(--card));border-color:var(--acc);color:var(--ink)}.day[aria-pressed=true] small{color:var(--ink)}
 .slots{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:10px}
 .slot{display:flex;align-items:center;gap:10px;padding:12px 14px;border-radius:18px;background:var(--card);box-shadow:var(--sh);text-align:left;border:2px solid transparent}
 .slot[aria-pressed=true]{border-color:var(--acc)}.slot small{display:block;color:var(--mut)}.slot svg{color:var(--mut)}
