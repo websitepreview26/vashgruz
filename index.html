@@ -385,7 +385,7 @@ function conditions(prefix,title,showTitle=true){
  const place=!prefix&&isRemoval(w.sv);
  const where=place?`<div class="pickup-place" role="group" aria-label="Откуда забирать"><button data-a="pickup-place" data-v="indoor" aria-pressed="${w.location==='indoor'}">Из помещения</button><button data-a="pickup-place" data-v="outside" aria-pressed="${w.location==='outside'}">Уже на улице</button></div>`:'';
  if(place&&w.location!=='indoor')return where;
- return `${showTitle?`<p class="conditions-title">${title}</p>`:''}${where}<div class="card conditions"><div class="rw"><span>Этаж <small class="condition-optional">необязательно</small></span><div class="floor-picker"><select data-floor="${f}" data-k="${f}" aria-label="Этаж: ${title}"><option value="" ${!Number.isInteger(w[f])?'selected':''}>Не указан</option>${Array.from({length:50},(_,i)=>i+1).map(n=>`<option value="${n}" ${w[f]===n?'selected':''}>${n} этаж</option>`).join('')}</select><svg aria-hidden="true" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></svg></div></div><div class="rw"><span>Лифт</span><div class="lift-options" role="group" aria-label="Лифт: ${title}">${[[true,'Есть'],[false,'Нет']].map(([value,label])=>`<button data-a="lift-choice" data-k="${l}" data-v="${value}" aria-pressed="${value===w[l]||value===null&&w[l]===undefined}">${label}</button>`).join('')}</div></div>${liftDetails(prefix)}</div>`;
+ return `${showTitle?`<p class="conditions-title">${title}</p>`:''}${where}<div class="card conditions"><div class="rw"><span>Этаж <small class="condition-optional">необязательно</small></span><div class="floor-picker"><select data-floor="${f}" data-k="${f}" aria-label="Этаж: ${title}"><option value="" ${!Number.isInteger(w[f])?'selected':''}>Не указан</option>${Array.from({length:30},(_,i)=>i+1).map(n=>`<option value="${n}" ${w[f]===n?'selected':''}>${n} этаж</option>`).join('')}</select><svg aria-hidden="true" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></svg></div></div><div class="rw"><span>Лифт</span><div class="lift-options" role="group" aria-label="Лифт: ${title}">${[[true,'Есть'],[false,'Нет']].map(([value,label])=>`<button data-a="lift-choice" data-k="${l}" data-v="${value}" aria-pressed="${value===w[l]||value===null&&w[l]===undefined}">${label}</button>`).join('')}</div></div>${liftDetails(prefix)}</div>`;
 }
 
 let photoJob=null;
@@ -975,7 +975,7 @@ const edgeBack=(()=>{
 function selectFloor(field){
  const key=field.dataset.floor;if(!S.w||S.sending||S.preparing||!['floor','toFloor'].includes(key))return;
  const value=field.value===''?null:Number(field.value);
- if(value!==null&&(!Number.isInteger(value)||value<1||value>50))return;
+ if(value!==null&&(!Number.isInteger(value)||value<1||value>30))return;
  S.w[key]=value;hap();storeDraft();refresh();
 }
 document.addEventListener('change',e=>{if(e.target.matches('select[data-floor]'))selectFloor(e.target)});

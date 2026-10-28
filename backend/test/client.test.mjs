@@ -339,10 +339,10 @@ test('photo progress: a failed photo advances the batch and does not leave the i
 test('floor picker selects high floors directly, keeps addresses independent and allows clearing',()=>{
  const c=client();c.run("S.w=newW('flat');S.step=1;render()");
  assert.match(c.node('#view').innerHTML,/data-floor="floor"/);assert.match(c.node('#view').innerHTML,/data-floor="toFloor"/);
- c.run("selectFloor({dataset:{floor:'floor'},value:'24'});selectFloor({dataset:{floor:'toFloor'},value:'50'})");
- assert.equal(c.run('S.w.floor'),24);assert.equal(c.run('S.w.toFloor'),50);
+ c.run("selectFloor({dataset:{floor:'floor'},value:'24'});selectFloor({dataset:{floor:'toFloor'},value:'30'})");
+ assert.equal(c.run('S.w.floor'),24);assert.equal(c.run('S.w.toFloor'),30);
  assert.match(c.run("conditions('','В точке А')"),/<option value="24" selected>24 этаж/);
- const draft=JSON.parse(c.storage.get(c.run('ORDER_STORAGE_KEY')))[0];assert.equal(draft.floor,24);assert.equal(draft.toFloor,50);
- c.run("selectFloor({dataset:{floor:'floor'},value:''})");assert.equal(c.run('S.w.floor'),null);assert.equal(c.run('S.w.toFloor'),50);
- for(const value of ['0','51','1.5','bad']){c.context.badFloor=value;c.run("selectFloor({dataset:{floor:'floor'},value:badFloor})");assert.equal(c.run('S.w.floor'),null)}
+ const draft=JSON.parse(c.storage.get(c.run('ORDER_STORAGE_KEY')))[0];assert.equal(draft.floor,24);assert.equal(draft.toFloor,30);
+ c.run("selectFloor({dataset:{floor:'floor'},value:''})");assert.equal(c.run('S.w.floor'),null);assert.equal(c.run('S.w.toFloor'),30);
+ for(const value of ['0','31','50','1.5','bad']){c.context.badFloor=value;c.run("selectFloor({dataset:{floor:'floor'},value:badFloor})");assert.equal(c.run('S.w.floor'),null)}
 });
