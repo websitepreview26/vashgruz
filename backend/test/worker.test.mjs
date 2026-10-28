@@ -33,6 +33,7 @@ function env(){
   sqlite.exec(readFileSync(new URL('../migrations/0007_contact_diagnostics.sql',import.meta.url),'utf8'));
   sqlite.exec(readFileSync(new URL('../migrations/0008_security.sql',import.meta.url),'utf8'));
   sqlite.exec(readFileSync(new URL('../migrations/0009_bot_chat.sql',import.meta.url),'utf8'));
+  sqlite.exec(readFileSync(new URL('../migrations/0010_welcome_photo.sql',import.meta.url),'utf8'));
   return {MINI_APP_URL:'https://websitepreview26.github.io/vashgruz/',BOT_USERNAME:'vash_gruz_test_bot',BOT_TOKEN:TOKEN,TELEGRAM_CHAT_ID:'-100123456789',ALLOWED_ORIGIN:ORIGIN,DB:{
     prepare(sql){return {bind(...args){return {
       sql,args,
@@ -583,7 +584,7 @@ test('bot chat: start creates one pinned welcome before deleting the incoming co
  const e=privateEnv(),calls=telegramMock();assert.equal((await worker.fetch(privateMessage(),e)).status,200);
  assert.deepEqual(calls.map(c=>c.method),['sendMessage','pinChatMessage','deleteMessage']);
  const welcome=calls[0].form;assert.match(welcome.get('text'),/ВАШ ГРУЗ/);assert.match(welcome.get('text'),/очищаются автоматически/);assert.equal(welcome.get('chat_id'),'42');assert.equal(welcome.get('parse_mode'),'HTML');
- assert.equal(JSON.parse(welcome.get('reply_markup')).inline_keyboard[0][0].web_app.url,e.MINI_APP_URL);
+ assert.equal(welcome.get('reply_markup'),null);
  assert.equal(calls[1].form.get('message_id'),'100');assert.equal(calls[2].form.get('message_id'),'200');
  assert.equal(e.sqlite.prepare('SELECT pinned FROM bot_private_chats').get().pinned,1);
 });
@@ -687,4 +688,55 @@ test('bot chat: enabling cleanup does not erase input until the welcome includes
  e.CLEAN_PRIVATE_MESSAGES='true';const calls=telegramMock(method=>method==='editMessageText'?Response.json({ok:false,error_code:400,description:'Bad Request: cannot edit message'},{status:400}):undefined);
  await worker.fetch(privateMessage('keep until the warning is visible',{id:201}),e);await maintenance(e);
  assert.equal(calls.some(c=>c.method==='deleteMessage'),false);assert.equal(e.sqlite.prepare('SELECT state FROM private_message_cleanup').get().state,'pending');
+});
+
+const welcomePhoto='https://websitepreview26.github.io/vashgruz/images/welcome-test.png';
+function profileWithChatMock(e,extra){
+ const description={},short={},commands={};
+ return telegramMock((method,calls)=>{
+  const form=calls.at(-1).form,language=form.get('language_code')||'';
+  const response=extra?.(method,form,calls);if(response)return response;
+  if(method==='getMe')return Response.json({ok:true,result:{username:e.BOT_USERNAME}});
+  if(method==='setMyDescription')description[language]=form.get('description');
+  if(method==='setMyShortDescription')short[language]=form.get('short_description');
+  if(method==='setMyCommands')commands[language]=JSON.parse(form.get('commands'));
+  if(method==='getMyDescription')return Response.json({ok:true,result:{description:description[language]}});
+  if(method==='getMyShortDescription')return Response.json({ok:true,result:{short_description:short[language]}});
+  if(method==='getMyCommands')return Response.json({ok:true,result:commands[language]});
+  if(method==='getChatMenuButton')return Response.json({ok:true,result:{type:'web_app',web_app:{url:e.MINI_APP_URL}}});
+ });
+}
+test('welcome photo: new chats get a photo and concise caption with no duplicate inline button',async()=>{
+ const e={...privateEnv(),WELCOME_PHOTO_URL:welcomePhoto},calls=telegramMock();await worker.fetch(privateMessage(),e);
+ assert.deepEqual(calls.map(c=>c.method),['sendPhoto','pinChatMessage','deleteMessage']);
+ assert.equal(calls[0].form.get('photo'),welcomePhoto);assert.equal(calls[0].form.get('reply_markup'),null);assert(calls[0].form.get('caption').length<1024);assert.match(calls[0].form.get('caption'),/внизу/);
+ assert.equal(e.sqlite.prepare('SELECT welcome_kind,welcome_media_url FROM bot_private_chats').get().welcome_kind,'photo');
+});
+test('welcome photo: an existing text welcome becomes a photo in place and loses its inline keyboard',async()=>{
+ const e=privateEnv(),calls=telegramMock();await worker.fetch(privateMessage(),e);e.WELCOME_PHOTO_URL=welcomePhoto;
+ await worker.fetch(privateMessage('/start',{id:201}),e);
+ const media=calls.find(c=>c.method==='editMessageMedia');assert(media);assert.equal(media.form.get('message_id'),'100');assert.equal(JSON.parse(media.form.get('media')).media,welcomePhoto);assert.deepEqual(JSON.parse(media.form.get('reply_markup')),{inline_keyboard:[]});
+ assert.equal(calls.filter(c=>c.method==='sendMessage').length,1);assert.equal(calls.some(c=>c.method==='sendPhoto'),false);assert.equal(e.sqlite.prepare('SELECT welcome_message_id FROM bot_private_chats').get().welcome_message_id,100);
+});
+test('welcome photo: repeated commands update only the caption, retaining the photo and one menu entry',async()=>{
+ const e={...privateEnv(),WELCOME_PHOTO_URL:welcomePhoto},calls=telegramMock();await worker.fetch(privateMessage(),e);await worker.fetch(privateMessage('/help',{id:201}),e);
+ assert.equal(calls.filter(c=>c.method==='sendPhoto').length,1);assert.equal(calls.filter(c=>c.method==='editMessageCaption').length,1);assert.equal(calls.some(c=>c.method==='editMessageMedia'),false);
+ assert.deepEqual(JSON.parse(calls.find(c=>c.method==='editMessageCaption').form.get('reply_markup')),{inline_keyboard:[]});
+});
+test('welcome photo: profile refresh edits the pinned message and verifies the visible photo without sending new messages',async()=>{
+ const e=privateEnv();telegramMock();await worker.fetch(privateMessage(),e);e.WELCOME_PHOTO_URL=welcomePhoto;e.ADMIN_SETUP_SECRET=WEBHOOK_SECRET;
+ const calls=profileWithChatMock(e,method=>method==='getChat'?Response.json({ok:true,result:{pinned_message:{message_id:100,photo:[{file_id:'welcome-photo'}],caption:'ВАШ ГРУЗ'}}}):undefined);
+ const response=await worker.fetch(setupRequest({action:'bot_profile'}),e);assert.equal(response.status,200);const data=await response.json();assert.deepEqual(data.welcomeRefresh,{updated:1,verified:1,remaining:0});
+ assert.equal(calls.filter(c=>c.method==='editMessageMedia').length,1);assert.equal(calls.some(c=>c.method==='sendPhoto'||c.method==='sendMessage'||c.method==='pinChatMessage'),false);
+});
+test('welcome photo: admin refresh does not recreate a welcome that the user deleted',async()=>{
+ const e=privateEnv();telegramMock();await worker.fetch(privateMessage(),e);e.WELCOME_PHOTO_URL=welcomePhoto;e.ADMIN_SETUP_SECRET=WEBHOOK_SECRET;
+ const calls=profileWithChatMock(e,method=>method==='editMessageMedia'?Response.json({ok:false,error_code:400,description:'Bad Request: message to edit not found'},{status:400}):undefined);
+ const response=await worker.fetch(setupRequest({action:'bot_profile'}),e);assert.equal(response.status,200);assert.equal((await response.json()).welcomeRefresh.updated,0);
+ assert.equal(calls.some(c=>c.method==='sendMessage'||c.method==='sendPhoto'),false);assert.equal(e.sqlite.prepare('SELECT welcome_message_id FROM bot_private_chats').get().welcome_message_id,null);
+});
+test('welcome photo: failed media changes remain pending even if the text revision is current',async()=>{
+ const e=privateEnv();telegramMock();await worker.fetch(privateMessage(),e);e.WELCOME_PHOTO_URL=welcomePhoto;e.ADMIN_SETUP_SECRET=WEBHOOK_SECRET;
+ profileWithChatMock(e,method=>method==='editMessageMedia'?Response.json({ok:false,error_code:400,description:'Bad Request: failed to get HTTP URL content'},{status:400}):undefined);
+ const response=await worker.fetch(setupRequest({action:'bot_profile'}),e);assert.equal(response.status,200);assert.equal((await response.json()).welcomeRefresh.remaining,1);assert.equal(e.sqlite.prepare('SELECT welcome_kind FROM bot_private_chats').get().welcome_kind,'text');
 });

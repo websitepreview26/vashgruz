@@ -278,7 +278,7 @@ export function createStatusService({telegram,stmt,fail}){
     const key=request.headers.get('authorization')?.replace(/^Bearer /,'');
     if(!secretMatches(key,env.ADMIN_SETUP_SECRET))fail(403,'SETUP_AUTH','Доступ запрещён.');
     const body=await smallJson(request);
-    if(body.action==='bot_profile')return configureBotProfile(env,telegram,fail);
+    if(body.action==='bot_profile')return {...await configureBotProfile(env,telegram,fail),welcomeRefresh:await botChat.refreshExisting(env)};
     if(body.action==='deliveries'){
       const now=Date.now();
       return {ok:true,orders:(await stmt(env,"SELECT id,state,updated_at,delivery_attempts,message_kind FROM orders WHERE state='uncertain' OR (state IN ('sending_text','sending_photos') AND updated_at<?) OR (state='received' AND delivery_attempts>=5) ORDER BY updated_at LIMIT 100",now-120000).all()).results,

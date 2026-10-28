@@ -52,7 +52,14 @@ fetch(d.url,{method:'POST',headers:{authorization:'Bearer '+d.key,'content-type'
             raise SystemExit(data.get("message", "Описание не подтверждено Telegram."))
         if data.get("bot", "").lower() != target["bot"].lower():
             raise SystemExit("Ответил другой бот. Проверьте конфигурацию.")
+        refresh = data.get("welcomeRefresh", {})
+        if refresh.get("remaining", 0):
+            raise SystemExit("Описание обновлено. Часть приветствий ещё ожидает обновления; повторите команду позже.")
+        if refresh.get("updated", 0) != refresh.get("verified", 0):
+            raise SystemExit("Описание обновлено, но Telegram пока не подтвердил вид всех закреплённых приветствий. Повторите проверку.")
         print("Описание, краткая информация, команды и кнопка меню подтверждены Telegram для @" + data["bot"] + ".")
+        if refresh.get("verified"):
+            print("Существующие закреплённые приветствия обновлены и проверены: " + str(refresh["verified"]) + ".")
         print("Приветствие закрепится в личном чате при /start или первом обращении.")
         print("Очистка новых сообщений: " + ("включена" if data.get("cleanup") else "выключена") + ".")
         return

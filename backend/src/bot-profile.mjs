@@ -1,26 +1,31 @@
-export const PROFILE_REVISION=1;
-export const SHORT_DESCRIPTION='Вывоз мебели и мусора, демонтаж. Заявка с фото, расчёт стоимости и статусы — в приложении.';
+export const PROFILE_REVISION=2;
+export const SHORT_DESCRIPTION='Вывоз мебели, мусора и демонтаж. Оставьте заявку в приложении — рассчитаем стоимость.';
 export const DESCRIPTION=[
- 'ВАШ ГРУЗ — вывоз мебели и мусора, демонтаж.',
- 'Опишите задачу, укажите адрес и при желании добавьте фото. Мы оценим работу и предложим стоимость.',
- 'Цена, условия и статусы — в приложении. После вашего согласия менеджер свяжется с вами, чтобы уточнить детали.',
- 'Нажмите «Получить оценку», чтобы начать.'
+ 'ВАШ ГРУЗ — вывоз старой мебели и мусора, демонтаж.',
+ 'Опишите задачу в приложении — получите стоимость и согласуйте детали с менеджером.',
+ 'Для начала нажмите «Получить оценку» внизу чата.'
 ].join('\n\n');
 export const BOT_COMMANDS=[{command:'start',description:'Открыть приложение и узнать, как всё работает'},{command:'help',description:'Услуги, стоимость и статус заявки'}];
 export function welcomeText(cleanup){return [
- '🚚 <b>ВАШ ГРУЗ</b>',
- 'Вывоз мебели и мусора · Демонтаж',
- '<b>От задачи — к понятной стоимости</b>\n1. Выберите услугу и опишите задачу.\n2. Укажите адрес и добавьте фото, если они помогут оценить работу.\n3. Получите предложение и согласуйте условия.',
- '<b>Всё по заявке — в одном месте</b>\nСтоимость, ответ менеджера и статусы появятся в разделе «Заявки». После принятия цены менеджер свяжется с вами для уточнения деталей.',
- 'Нажмите кнопку ниже, чтобы получить оценку.',
- ...(cleanup?['ℹ️ Сообщения в этом чате очищаются автоматически. Чтобы передать задачу или задать вопрос по предложению, откройте приложение.']:[])
+ '<b>ВАШ ГРУЗ</b>\nВывезем старую мебель и мусор, поможем с демонтажом.',
+ 'Опишите задачу в приложении — там появятся стоимость и ответ менеджера.',
+ 'Нажмите <b>«Получить оценку»</b> внизу, чтобы начать.',
+ ...(cleanup?['Сообщения в этом чате очищаются автоматически.']:[])
 ].join('\n\n')}
 export function miniAppUrl(env){
  const url=new URL(env.MINI_APP_URL);
  if(url.protocol!=='https:'||url.origin!==env.ALLOWED_ORIGIN)throw Error('Invalid Mini App configuration');
  return url.href;
 }
-export const welcomeKeyboard=env=>({inline_keyboard:[[{text:'Получить оценку',web_app:{url:miniAppUrl(env)}}]]});
+// The persistent blue menu button is the single entry point. This empty markup
+// also removes the old duplicate inline button when an existing welcome is edited.
+export const welcomeKeyboard=()=>({inline_keyboard:[]});
+export function welcomePhotoUrl(env){
+ if(!env.WELCOME_PHOTO_URL)return null;
+ const url=new URL(env.WELCOME_PHOTO_URL);
+ if(url.protocol!=='https:'||url.origin!==new URL(miniAppUrl(env)).origin)throw Error('Invalid welcome photo configuration');
+ return url.href;
+}
 const form=data=>{const f=new FormData();for(const [k,v] of Object.entries(data))f.set(k,typeof v==='object'?JSON.stringify(v):String(v));return f};
 export async function configureBotProfile(env,telegram,fail){
  const bot=await telegram(env,'getMe',new FormData());
