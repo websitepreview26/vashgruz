@@ -33,7 +33,7 @@ export function statusKeyboard(row,confirmCancel=false){
  return {inline_keyboard:[buttons,[{text:'Закрыть заявку',callback_data:data('ask_cancel')}],...details]};
 }
 export function createStatusService({telegram,stmt,fail}){
-  const outbox=createOutbox({stmt,telegram,edit});
+  const outbox=createOutbox({stmt,telegram,edit,sendManagerControls});
   const botChat=createBotChatService({telegram,stmt});
   async function smallJson(request){
     const reader=request.body?.getReader();if(!reader)fail(400,'FORMAT','Пустой запрос.');
@@ -110,11 +110,23 @@ export function createStatusService({telegram,stmt,fail}){
    if(row.message_kind&&row.message_kind!=='text'){form.set('caption',compactCaption(managerText(row,message)));return telegram(env,'editMessageCaption',form)}
    form.set('text',managerText(row,message));return telegram(env,'editMessageText',form);
   }
+  async function sendManagerControls(env,row){
+   const form=new FormData();form.set('chat_id',env.TELEGRAM_CHAT_ID);form.set('protect_content','true');
+   form.set('text',managerText(row));form.set('reply_parameters',JSON.stringify({message_id:row.message_id}));
+   form.set('reply_markup',JSON.stringify(statusKeyboard({...row,message_kind:'text'})));
+   return telegram(env,'sendMessage',form);
+  }
   async function ensureMediaButtons(env,row){
-   if(row.message_kind!=='album'||row.buttons_version)return;
-   const form=new FormData();form.set('chat_id',env.TELEGRAM_CHAT_ID);form.set('message_id',String(row.message_id));form.set('reply_markup',JSON.stringify(statusKeyboard(row)));
-   await telegram(env,'editMessageReplyMarkup',form);
-   await stmt(env,'UPDATE orders SET buttons_version=1 WHERE id=?',row.id).run();
+   if(row.message_kind!=='album'||row.state!=='sent')return;
+   // Album keyboards can be accepted by Telegram but hidden by its clients.
+   // Use a separate, durable control card linked to the existing album.
+   await received(env,row.id);
+   await outbox.enqueue(env,'received:'+row.id,row.id,'sendMessage',{managerControls:true},Date.now()).run();
+   await outbox.flush(env,row.id);
+  }
+  async function maintainMediaButtons(env){
+   const rows=(await stmt(env,"SELECT * FROM orders WHERE state='sent' AND message_kind='album' AND message_id IS NOT NULL AND NOT EXISTS(SELECT 1 FROM delivery_outbox WHERE order_id=orders.id AND id='received:'||orders.id||':sendMessage') ORDER BY created_at LIMIT 10").all()).results;
+   for(const row of rows)await ensureMediaButtons(env,row);
   }
   async function reply(env,message,text,markup){
    const f=new FormData();f.set('chat_id',env.TELEGRAM_CHAT_ID);f.set('text',text);f.set('reply_parameters',JSON.stringify({message_id:message.message_id}));
@@ -302,9 +314,13 @@ export function createStatusService({telegram,stmt,fail}){
         }
       }else{
         if(!['delivered','not_delivered'].includes(body.outcome))fail(400,'RESOLUTION','Укажите результат сверки уведомления.');
+        const task=await stmt(env,'SELECT * FROM delivery_outbox WHERE id=?',body.id).first();
+        const managerCard=task?.kind==='sendMessage'&&JSON.parse(task.payload).managerControls===true;
+        if(managerCard&&body.outcome==='delivered'&&(!Number.isSafeInteger(body.messageId)||body.messageId<=0))fail(400,'RESOLUTION','Нужен ID карточки управления в группе.');
         const changes=await env.DB.batch([
           stmt(env,"INSERT INTO delivery_resolutions(id,order_id,task_id,outcome,note,created_at) SELECT ?,order_id,id,?,?,? FROM delivery_outbox WHERE id=? AND (state IN ('uncertain','failed') OR (state='sending' AND lease_until<?))",auditId,body.outcome,body.note.trim(),now,body.id,now),
-          stmt(env,"UPDATE delivery_outbox SET state=?,available_at=?,lease_token='',lease_until=0,last_error='',attempts=0 WHERE id=? AND EXISTS(SELECT 1 FROM delivery_resolutions WHERE id=? AND task_id=delivery_outbox.id)",body.outcome==='delivered'?'sent':'pending',now,body.id,auditId)
+          stmt(env,"UPDATE delivery_outbox SET state=?,available_at=?,lease_token='',lease_until=0,last_error='',attempts=0 WHERE id=? AND EXISTS(SELECT 1 FROM delivery_resolutions WHERE id=? AND task_id=delivery_outbox.id)",body.outcome==='delivered'?'sent':'pending',now,body.id,auditId),
+          ...(managerCard&&body.outcome==='delivered'?[stmt(env,"UPDATE orders SET message_id=?,message_kind='text',buttons_version=1 WHERE id=? AND EXISTS(SELECT 1 FROM delivery_resolutions WHERE id=? AND task_id=?)",body.messageId,task.order_id,auditId,body.id)]:[])
         ]);
         if(!changes[1].meta.changes)fail(409,'STALE','Уведомление уже изменилось или ещё отправляется.');
       }
@@ -334,5 +350,5 @@ export function createStatusService({telegram,stmt,fail}){
     const info=await setupTelegram('getWebhookInfo',new FormData());
     return {ok:true,webhook:info.url===url,pending:info.pending_update_count||0};
   }
-  return {ensureMediaButtons,received,list,get,contact,saveContact,decision,organize,webhook,setup,flushOutbox:outbox.flush,maintainBotChat:botChat.maintenance};
+  return {ensureMediaButtons,maintainMediaButtons,received,list,get,contact,saveContact,decision,organize,webhook,setup,flushOutbox:outbox.flush,maintainBotChat:botChat.maintenance};
 }

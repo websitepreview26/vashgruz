@@ -180,7 +180,7 @@ async function dispatch(env,row,w,user,photos){
 }
 export default {
   async scheduled(controller,env,ctx){
-    ctx.waitUntil((async()=>{await statusService.flushOutbox(env);await statusService.maintainBotChat(env);await stmt(env,'DELETE FROM request_limits WHERE expires_at<?',Date.now()).run()})());
+    ctx.waitUntil((async()=>{await statusService.maintainMediaButtons(env);await statusService.flushOutbox(env);await statusService.maintainBotChat(env);await stmt(env,'DELETE FROM request_limits WHERE expires_at<?',Date.now()).run()})());
   },
   async fetch(request,env){
     const origin=request.headers.get('origin'),allowed=env.ALLOWED_ORIGIN;

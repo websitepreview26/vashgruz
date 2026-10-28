@@ -1,5 +1,5 @@
 // Enqueue inside the same D1 batch as the business event. Sending is a separate step.
-export function createOutbox({stmt,telegram,edit}){
+export function createOutbox({stmt,telegram,edit,sendManagerControls}){
  function enqueue(env,eventId,orderId,kind,payload,now){
   return stmt(env,`INSERT OR IGNORE INTO delivery_outbox(id,order_id,kind,payload,available_at,created_at)
    SELECT ?,order_id,?,?,?,? FROM order_status_events WHERE event_id=? AND order_id=?`,eventId+':'+kind,kind,JSON.stringify(payload),now,now,eventId,orderId);
@@ -16,7 +16,18 @@ export function createOutbox({stmt,telegram,edit}){
     (SELECT 1 FROM delivery_outbox other WHERE other.order_id=delivery_outbox.order_id AND other.state='sending')`,token,Date.now()+120000,task.id,Date.now()).run();
    if(!lock.meta.changes)continue;
    try{
-    if(task.kind==='edit'){
+    if(task.kind==='sendMessage'&&JSON.parse(task.payload).managerControls===true){
+     const row=await stmt(env,'SELECT * FROM orders WHERE id=?',task.order_id).first();
+     if(row?.state==='sent'&&row.message_kind==='album'){
+      const message=await sendManagerControls(env,row);
+      if(!Number.isSafeInteger(message?.message_id)||message.message_id<=0)throw Error('Missing manager card ID');
+      await env.DB.batch([
+       stmt(env,"UPDATE orders SET message_id=?,message_kind='text',buttons_version=1 WHERE id=? AND EXISTS(SELECT 1 FROM delivery_outbox WHERE id=? AND lease_token=? AND state='sending')",message.message_id,row.id,task.id,token),
+       stmt(env,"UPDATE delivery_outbox SET state='sent',last_error='',lease_token='' WHERE id=? AND lease_token=?",task.id,token)
+      ]);
+      continue;
+     }
+    }else if(task.kind==='edit'){
      const row=await stmt(env,'SELECT * FROM orders WHERE id=?',task.order_id).first();
      if(row?.state==='sent')await edit(env,row);
     }else{

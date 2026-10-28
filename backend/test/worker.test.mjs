@@ -106,13 +106,14 @@ test('single photo is the order card with caption and controls, without separate
   const row=e.sqlite.prepare('SELECT * FROM orders').get();
   assert.equal(row.photo_file_ids,'["stored-photo"]');assert.equal(row.message_kind,'photo');assert.equal(row.message_id,101);
 });
-test('album carries the order caption and receives controls on its first photo',async()=>{
+test('album has a separate control card linked to the photos',async()=>{
   const e=env(),calls=telegramMock(),id=crypto.randomUUID();
   const r=await worker.fetch(await request({id,files:[photo(),photo()]}),e);assert.equal((await r.json()).photoCount,2);
-  assert.deepEqual(calls.map(c=>c.method),['sendMediaGroup','editMessageReplyMarkup']);
+  assert.deepEqual(calls.map(c=>c.method),['sendMediaGroup','sendMessage']);
   const media=JSON.parse(calls[0].form.get('media'));assert.equal(media.length,2);
   assert.match(media[0].caption,/Заявка на оценку/);assert.equal(media[1].caption,undefined);
-  assert.equal(calls[1].form.get('message_id'),'101');assert.match(calls[1].form.get('reply_markup'),/Полная заявка/);
+  assert.equal(JSON.parse(calls[1].form.get('reply_parameters')).message_id,101);assert.match(calls[1].form.get('reply_markup'),/Взять на оценку/);assert.match(calls[1].form.get('text'),/Минск, Ленина 1/);
+  const row=e.sqlite.prepare('SELECT * FROM orders').get();assert.equal(row.message_kind,'text');assert.equal(row.message_id,100);
   assert.equal((await worker.fetch(await request({id,files:[photo(),photo()]}),e)).status,200);assert.equal(calls.length,2);
 });
 test('definitive media rejection retries the combined card without creating text',async()=>{
@@ -125,14 +126,49 @@ test('definitive media rejection retries the combined card without creating text
   const b=await worker.fetch(await request({id,files:[photo()]}),e);assert.equal((await b.json()).ok,true);
   assert.deepEqual(calls.map(c=>c.method),['sendPhoto','sendPhoto']);
 });
-test('album keyboard failure retries only editing, never uploads the album twice',async()=>{
+test('album control card rejection is retried by maintenance without uploading photos again',async()=>{
   let reject=true;const e=env(),id=crypto.randomUUID(),calls=telegramMock(method=>{
-    if(method==='editMessageReplyMarkup'&&reject){reject=false;throw Error('Connection lost')}
+    if(method==='sendMessage'&&reject){reject=false;return Response.json({ok:false,error_code:429,parameters:{retry_after:10}},{status:429})}
   });
-  assert.equal((await worker.fetch(await request({id,files:[photo(),photo()]}),e)).status,409);
-  assert.equal(e.sqlite.prepare('SELECT state FROM orders').get().state,'sent');
   assert.equal((await worker.fetch(await request({id,files:[photo(),photo()]}),e)).status,200);
-  assert.deepEqual(calls.map(c=>c.method),['sendMediaGroup','editMessageReplyMarkup','editMessageReplyMarkup']);
+  assert.equal(e.sqlite.prepare('SELECT state FROM orders').get().state,'sent');
+  e.sqlite.exec('UPDATE delivery_outbox SET available_at=0');
+  const pending=[];await worker.scheduled({},e,{waitUntil:p=>pending.push(p)});await Promise.all(pending);
+  assert.deepEqual(calls.map(c=>c.method),['sendMediaGroup','sendMessage','sendMessage']);
+  assert.equal(e.sqlite.prepare('SELECT message_kind FROM orders').get().message_kind,'text');
+});
+test('lost album control response is held for review and cannot create duplicate controls or photos',async()=>{
+ const e=env(),id=crypto.randomUUID(),calls=telegramMock(method=>{if(method==='sendMessage')throw Error('Connection lost')});
+ assert.equal((await worker.fetch(await request({id,files:[photo(),photo()]}),e)).status,200);
+ assert.equal(e.sqlite.prepare('SELECT state FROM delivery_outbox').get().state,'uncertain');
+ await worker.fetch(await request({id,files:[photo(),photo()]}),e);
+ const pending=[];await worker.scheduled({},e,{waitUntil:p=>pending.push(p)});await Promise.all(pending);
+ assert.deepEqual(calls.map(c=>c.method),['sendMediaGroup','sendMessage']);
+});
+test('maintenance repairs previously confirmed album keyboards exactly once',async()=>{
+ const e={...env(),TELEGRAM_WEBHOOK_SECRET:WEBHOOK_SECRET},calls=managerMock();await worker.fetch(await request(),e);
+ e.sqlite.exec("UPDATE orders SET message_kind='album',photo_count=5,buttons_version=1");calls.length=0;
+ for(let i=0;i<2;i++){const pending=[];await worker.scheduled({},e,{waitUntil:p=>pending.push(p)});await Promise.all(pending)}
+ assert.deepEqual(calls.map(c=>c.method),['sendMessage']);
+ const row=e.sqlite.prepare('SELECT * FROM orders').get();assert.equal(row.message_kind,'text');assert.equal(row.message_id,100);
+ const r=await worker.fetch(callbackRequest(row.id,0,'processing',{message:row.message_id}),e);
+ assert.equal(r.status,200);assert.equal(e.sqlite.prepare('SELECT business_status FROM orders').get().business_status,'processing');
+});
+test('concurrent album repair sends one control card',async()=>{
+ const e=env();telegramMock();await worker.fetch(await request(),e);
+ e.sqlite.exec("UPDATE orders SET message_kind='album',photo_count=2");const calls=telegramMock();
+ const pending=[];for(let i=0;i<2;i++)await worker.scheduled({},e,{waitUntil:p=>pending.push(p)});await Promise.all(pending);
+ assert.deepEqual(calls.map(c=>c.method),['sendMessage']);
+});
+test('reviewed album control delivery requires a message ID and repairs the callback target',async()=>{
+ const e={...env(),ADMIN_SETUP_SECRET:WEBHOOK_SECRET};telegramMock(method=>{if(method==='sendMessage')throw Error('Connection lost')});
+ await worker.fetch(await request({files:[photo(),photo()]}),e);
+ const task=e.sqlite.prepare('SELECT * FROM delivery_outbox').get();
+ const body={action:'resolve_notification',id:task.id,confirmation:task.id,outcome:'delivered',note:'Verified existing control card'};
+ const resolve=()=>worker.fetch(new Request('https://api.example/internal/telegram/setup',{method:'POST',headers:{authorization:'Bearer '+WEBHOOK_SECRET},body:JSON.stringify(body)}),e);
+ assert.equal((await resolve()).status,400);body.messageId=500;assert.equal((await resolve()).status,200);
+ const row=e.sqlite.prepare('SELECT * FROM orders').get();assert.equal(row.message_id,500);assert.equal(row.message_kind,'text');
+ assert.equal(e.sqlite.prepare('SELECT state FROM delivery_outbox').get().state,'sent');
 });
 test('long captions fit Telegram limit and retain contact, addresses and latest status',()=>{
  const text=['Заявка на оценку VG-123456789012','Описание: '+ '📦'.repeat(500),'Адрес: '+ 'А'.repeat(220),'Куда: '+'Б'.repeat(220),'Телефон: +375291234567','Статус: Предложение готово','Предложение: 150 BYN','Условия: '+'В'.repeat(600),'Вопрос клиента: '+'Г'.repeat(400)].join('\n');
