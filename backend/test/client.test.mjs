@@ -212,7 +212,7 @@ test('pickup location controls conditions without assuming floor or lift and cop
  const c=client();c.run("S.w=newW('furniture');S.step=1;render()");
  assert.equal(c.run('S.w.floor'),null);assert.equal(c.run('S.w.lift'),null);assert.equal(c.run('S.w.location'),null);
  let html=c.node('#view').innerHTML;assert.match(html,/Из помещения/);assert.match(html,/Уже на улице/);assert(!html.includes('data-k="floor"'));
- c.run("S.w.location='indoor';render()");html=c.node('#view').innerHTML;assert.match(html,/data-k="floor"/);assert.match(html,/>—<\/b>/);assert(!html.includes('data-a="lift-choice" data-k="lift" data-v="true" aria-pressed="true"'));assert(!html.includes('data-a="lift-choice" data-k="lift" data-v="false" aria-pressed="true"'));assert(!html.includes('Не знаю'));
+ c.run("S.w.location='indoor';render()");html=c.node('#view').innerHTML;assert.match(html,/data-k="floor"/);assert.match(html,/<option value="" selected>Не указан<\/option>/);assert(!html.includes('data-a="lift-choice" data-k="lift" data-v="true" aria-pressed="true"'));assert(!html.includes('data-a="lift-choice" data-k="lift" data-v="false" aria-pressed="true"'));assert(!html.includes('Не знаю'));
  c.run("S.w.location='outside';S.w.floor=4;S.w.lift=true;render()");assert(!c.node('#view').innerHTML.includes('data-k="floor"'));assert.match(c.run('ticket(S.w)'),/Уже на улице/);assert(!c.run('ticket(S.w)').includes('4 этаж'));
  c.run("S.step=0;render()");html=c.node('#view').innerHTML;assert.match(html,/Описание/);assert.match(html,/Помогут точнее оценить стоимость/);assert(!html.includes('Коротко:'));
  c.run("S.step=2;render()");assert.match(c.node('#view').innerHTML,/Куда сообщить стоимость/);assert.match(c.node('#view').innerHTML,/Предложение появится здесь/);
@@ -334,4 +334,15 @@ test('photo progress: a failed photo advances the batch and does not leave the i
  const pending=c.run('addPhotos(files)');await waitForPhotoState(()=>jobs.length===1);jobs[0].reject(Error('Не удалось прочитать фото'));
  await waitForPhotoState(()=>jobs.length===2);assert.equal(c.node('#photo-progress-bar').value,1);assert.equal(c.run('S.w.photos.length'),0);jobs[1].resolve(preparedPhoto());await pending;
  assert.equal(c.run('S.preparing'),false);assert.equal(c.run('S.w.photos.length'),1);assert.match(c.run('S.photoError'),/Не удалось прочитать/);assert.equal(c.node('#go').disabled,false);
+});
+
+test('floor picker selects high floors directly, keeps addresses independent and allows clearing',()=>{
+ const c=client();c.run("S.w=newW('flat');S.step=1;render()");
+ assert.match(c.node('#view').innerHTML,/data-floor="floor"/);assert.match(c.node('#view').innerHTML,/data-floor="toFloor"/);
+ c.run("selectFloor({dataset:{floor:'floor'},value:'24'});selectFloor({dataset:{floor:'toFloor'},value:'50'})");
+ assert.equal(c.run('S.w.floor'),24);assert.equal(c.run('S.w.toFloor'),50);
+ assert.match(c.run("conditions('','В точке А')"),/<option value="24" selected>24 этаж/);
+ const draft=JSON.parse(c.storage.get(c.run('ORDER_STORAGE_KEY')))[0];assert.equal(draft.floor,24);assert.equal(draft.toFloor,50);
+ c.run("selectFloor({dataset:{floor:'floor'},value:''})");assert.equal(c.run('S.w.floor'),null);assert.equal(c.run('S.w.toFloor'),50);
+ for(const value of ['0','51','1.5','bad']){c.context.badFloor=value;c.run("selectFloor({dataset:{floor:'floor'},value:badFloor})");assert.equal(c.run('S.w.floor'),null)}
 });
