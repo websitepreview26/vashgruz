@@ -12,7 +12,7 @@ class Element {
 }
 function client({live=false,fetcher,initialOrders}={}){
   const nodes=new Map(),storage=new Map(),urls=new Set();let counter=0;
-  if(initialOrders)storage.set('vg-requests-v2',JSON.stringify(initialOrders));
+  if(initialOrders)storage.set('vg-requests-v2',JSON.stringify(initialOrders.map(o=>({ownerId:live?'42':'local',...o}))));
   const node=k=>{if(!nodes.has(k))nodes.set(k,new Element());return nodes.get(k)};
   const tg={initData:'signed-test-data',platform:'ios',colorScheme:'light',initDataUnsafe:{user:{id:42,first_name:'Тест'}},ready(){},expand(){},disableVerticalSwipes(){},setHeaderColor(){},setBackgroundColor(){},setBottomBarColor(){},onEvent(){},MainButton:{hide(){}},BackButton:{onClick(){},hide(){},show(){}},HapticFeedback:{selectionChanged(){},notificationOccurred(){}}};
   const doc={querySelector:node,querySelectorAll:()=>[],addEventListener(){},documentElement:{dataset:{},style:{setProperty(){}},classList:{add(){}}},createElement(name){
@@ -30,8 +30,8 @@ test('photo preparation, five-photo limit and session-only drafts',async()=>{
   await c.run('addPhotos(files)');
   assert.equal(c.run('S.w.photos.length'),5);assert.equal(c.run('S.preparing'),false);
   assert.match(c.run('S.photoError'),/до 5/);
-  const draft=JSON.parse(c.storage.get('vg-requests-v2'))[0];
-  assert.equal(draft.photoCount,5);assert.deepEqual(draft.photos,[]);assert(!c.storage.get('vg-requests-v2').includes('blob:'));
+  const draft=JSON.parse(c.storage.get(c.run('ORDER_STORAGE_KEY')))[0];
+  assert.equal(draft.photoCount,5);assert.deepEqual(draft.photos,[]);assert(!c.storage.get(c.run('ORDER_STORAGE_KEY')).includes('blob:'));
   assert.equal(c.urls.size,0);assert.match(c.node('#view').innerHTML,/Фото 5/);
 });
 test('empty description can advance without selecting a field',()=>{
@@ -62,14 +62,14 @@ test('server status replaces cached status, keeps drafts, and preserves scroll',
  const remote={...{sv:'trash',desc:'Диван',addr:'Минск, Ленина 1',to:'',floor:1,toFloor:1,lift:true,toLift:true,dis:false,date:'',slot:0,name:'',phone:'+375291234567'},serverId:'VG-TEST',requestId:'remote-request',status:'sent',businessStatus:'processing',statusUpdatedAt:Date.now(),photoCount:0,history:[{status:'received',at:Date.now()}]};
  const c=client({live:true,fetcher:async()=>Response.json({ok:true,orders:[remote]})});
  c.context.remote=remote;
- c.run("S.orders=[{...remote,id:'local-sent',businessStatus:'received'},{id:'draft-1',sv:'trash',status:'draft',desc:'Черновик',date:''}];S.tab='orders';render()");
+ c.run("S.orders=[{...remote,id:'local-sent',businessStatus:'received'},{id:'draft-1',sv:'trash',ownerId:String(user?.id||'local'),status:'draft',desc:'Черновик',date:''}];S.tab='orders';render()");
  c.node('#view').scrollTop=120;await c.run('syncOrders()');
  assert.equal(c.run('S.orders.length'),2);assert.equal(c.run('S.orders[0].businessStatus'),'processing');assert.equal(c.run('S.orders[0].id'),'local-sent');assert.equal(c.node('#view').scrollTop,120);
  assert.match(c.node('#view').innerHTML,/На оценке/);assert(!c.node('#view').innerHTML.includes('Черновик'));assert.match(c.run('home()'),/Продолжить заполнение/);
 });
 test('status fetch failure keeps last known state instead of fabricating progress',async()=>{
  const c=client({live:true,fetcher:async()=>{throw Error('offline')}});
- c.run("S.orders=[{id:'local',serverId:'VG-TEST',sv:'trash',status:'sent',businessStatus:'received',date:'',desc:'Диван'}];S.tab='orders'");
+ c.run("S.orders=[{id:'local',serverId:'VG-TEST',sv:'trash',ownerId:String(user?.id||'local'),status:'sent',businessStatus:'received',date:'',desc:'Диван'}];S.tab='orders'");
  await c.run('syncOrders()');assert.equal(c.run('S.orders[0].businessStatus'),'received');assert.match(c.node('#view').innerHTML,/Не удалось обновить статусы/);
 });
 
@@ -132,12 +132,12 @@ test('a changed quote is refreshed and never accepted automatically',async()=>{
 });
 
 test('active and archive tabs filter rows and show only first batch',()=>{
- const c=client();c.run("S.orders=Array.from({length:12},(_,i)=>({id:'sent-'+i,serverId:'VG-'+i,sv:'trash',status:'sent',date:'',desc:'Задача '+i,businessStatus:i===11?'cancelled':'received',customerVisibility:i===11?'archived':'active'}));S.tab='orders';render()");
+ const c=client();c.run("S.orders=Array.from({length:12},(_,i)=>({id:'sent-'+i,serverId:'VG-'+i,sv:'trash',ownerId:String(user?.id||'local'),status:'sent',date:'',desc:'Задача '+i,businessStatus:i===11?'cancelled':'received',customerVisibility:i===11?'archived':'active'}));S.tab='orders';render()");
  assert.equal((c.node('#view').innerHTML.match(/<article class="ord">/g)||[]).length,8);assert.match(c.node('#view').innerHTML,/Показать ещё \(3\)/);
  c.run("S.listTab='archive';render()");assert.equal((c.node('#view').innerHTML.match(/<article class="ord">/g)||[]).length,1);assert.match(c.node('#view').innerHTML,/Задача 11/);
 });
 test('local draft deletion uses calm confirmation and has no undo action',async()=>{
- const c=client();c.run("S.orders=[{id:'draft',sv:'trash',status:'draft',date:'',desc:'Тест'}];S.orderMenuId='draft';S.tab='orders';S.sheet='order-confirm';S.orderConfirmAction='delete'");
+ const c=client();c.run("S.orders=[{id:'draft',sv:'trash',ownerId:String(user?.id||'local'),status:'draft',date:'',desc:'Тест'}];S.orderMenuId='draft';S.tab='orders';S.sheet='order-confirm';S.orderConfirmAction='delete'");
  const confirmation=c.run('orderActionsSheet()+sheetCloseButton()');assert.match(confirmation,/Удалить черновик\?/);assert.match(confirmation,/Можно будет заполнить новую заявку/);assert.match(confirmation,/>Оставить</);assert(!confirmation.includes('Удалить из списка'));
  await c.run("organizeOrder('delete')");assert.equal(c.run('S.orders.length'),0);assert.equal(c.run('S.organizeError'),'');assert.match(c.node('#order-notice').innerHTML,/Черновик удалён/);assert(!c.node('#order-notice').innerHTML.includes('undo-order'));assert.equal(c.run('orderUndo'),null);
 });
@@ -187,23 +187,23 @@ test('existing drafts consolidate at startup, keeping newest filled form and eve
  assert.equal(c.run('S.orders.length'),2);assert.equal(c.run("S.orders.find(o=>o.status==='draft').id"),'latest');
  c.run("S.tab='orders';render()");assert.match(c.node('#view').innerHTML,/VG-REAL/);assert(!c.node('#view').innerHTML.includes('Черновик'));
  const home=c.run('home()');assert.match(home,/Продолжить заполнение/);assert.match(home,/data-a="draft-delete"/);assert(!home.includes('№'));
- assert.equal(JSON.parse(c.storage.get('vg-requests-v2')).length,2);
+ assert.equal(JSON.parse(c.storage.get(c.run('ORDER_STORAGE_KEY'))).length,2);
 });
 test('drafts cannot trigger history or list tabs; an empty history selection returns to current',()=>{
- const c=client();c.run("S.orders=[{id:'draft',status:'draft',sv:'trash',desc:'Незакончено',customerVisibility:'archived'},{id:'sent',status:'sent',serverId:'VG-SENT',sv:'trash',date:'',desc:'На оценке'}];S.tab='orders';render()");
+ const c=client();c.run("S.orders=[{id:'draft',ownerId:String(user?.id||'local'),status:'draft',sv:'trash',desc:'Незакончено',customerVisibility:'archived'},{id:'sent',ownerId:String(user?.id||'local'),status:'sent',serverId:'VG-SENT',sv:'trash',date:'',desc:'На оценке'}];S.tab='orders';render()");
  assert.equal(c.run('visibleOrders().length'),1);assert(!c.node('#view').innerHTML.includes('order-folders'));
  c.run("S.listTab='archive';render()");assert.equal(c.run('S.listTab'),'active');assert.equal(c.run('visibleOrders().length'),1);
 });
 test('only closed statuses create history; accepted offers and old manually archived leads stay current',()=>{
- const c=client();c.run("S.orders=[{id:'accepted',serverId:'VG-A',status:'sent',sv:'trash',date:'',businessStatus:'accepted',customerVisibility:'archived'},{id:'processing',serverId:'VG-P',status:'sent',sv:'trash',date:'',businessStatus:'processing',customerVisibility:'archived'}];S.tab='orders';render()");
+ const c=client();c.run("S.orders=[{id:'accepted',serverId:'VG-A',ownerId:String(user?.id||'local'),status:'sent',sv:'trash',date:'',businessStatus:'accepted',customerVisibility:'archived'},{id:'processing',serverId:'VG-P',ownerId:String(user?.id||'local'),status:'sent',sv:'trash',date:'',businessStatus:'processing',customerVisibility:'archived'}];S.tab='orders';render()");
  assert.equal(c.run('visibleOrders().length'),2);assert(!c.node('#view').innerHTML.includes('order-folders'));
- c.run("S.orders.push({id:'closed',serverId:'VG-C',status:'sent',sv:'trash',date:'',businessStatus:'cancelled',customerVisibility:'active'});render()");
+ c.run("S.orders.push({id:'closed',serverId:'VG-C',ownerId:String(user?.id||'local'),status:'sent',sv:'trash',date:'',businessStatus:'cancelled',customerVisibility:'active'});render()");
  assert.match(c.node('#view').innerHTML,/Текущие <span>2/);assert.match(c.node('#view').innerHTML,/История <span>1/);
  c.run("S.listTab='archive';render()");assert.equal(c.run('visibleOrders()[0].id'),'closed');
  c.run("S.orders=S.orders.filter(o=>o.id!=='closed');render()");assert.equal(c.run('S.listTab'),'active');assert(!c.node('#view').innerHTML.includes('order-folders'));
 });
 test('order menu contains deletion and current assessment cancellation without repeat or archive actions',()=>{
- const c=client();c.run("S.orders=[{id:'lead',serverId:'VG-LEAD',status:'sent',sv:'trash',businessStatus:'processing'}];S.orderMenuId='lead';S.sheet='order-actions'");
+ const c=client();c.run("S.orders=[{id:'lead',serverId:'VG-LEAD',ownerId:String(user?.id||'local'),status:'sent',sv:'trash',businessStatus:'processing'}];S.orderMenuId='lead';S.sheet='order-actions'");
  let menu=c.run('orderActionsSheet()');assert.match(menu,/Убрать из списка/);assert.match(menu,/Отменить оценку/);assert(!menu.includes('data-a="again"'));assert(!menu.includes('data-v="archive"'));assert(!menu.includes('data-v="restore"'));
  c.run("S.orders[0].businessStatus='cancelled'");menu=c.run('orderActionsSheet()');assert.match(menu,/Убрать из списка/);assert(!menu.includes('Отменить оценку'));
 });
@@ -244,4 +244,36 @@ test('lift landing question has no default and the answer appears in the request
  assert(!/data-a="lift-landing"[^>]+aria-pressed="true"/.test(c.node('#view').innerHTML));
  c.run("S.w.liftType='cargo';S.w.liftFirstFloor=false");assert.match(c.run('ticket(S.w)'),/грузовой лифт, только до 2-го этажа/);
  c.run('S.w.lift=false;render()');assert(!c.node('#view').innerHTML.includes('Лифт спускается'));assert(!c.run('ticket(S.w)').includes('до 2-го'));
+});
+
+test('security: foreign and unowned cached sent orders are never rendered on failed sync',async()=>{
+ const c=client({live:true,initialOrders:[{ownerId:'99',id:'foreign',serverId:'VG-000000000001',status:'sent',sv:'trash',date:'',desc:'PRIVATE OTHER ACCOUNT'},{ownerId:null,id:'unowned',status:'sent',sv:'trash',desc:'UNOWNED PRIVATE DATA'}],fetcher:async()=>{throw Error('offline')}});
+ c.run("S.tab='orders';render()");assert.equal(c.run('S.orders.length'),0);assert(!c.node('#view').innerHTML.includes('PRIVATE'));
+ await c.run('syncOrders()');assert.equal(c.run('S.orders.length'),0);assert(!c.node('#view').innerHTML.includes('PRIVATE'));
+ assert.match(c.run('ORDER_STORAGE_KEY'),/^vg-requests-v3:42:https:\/\/api\.example$/);
+});
+test('security: signed upload header is sent before multipart body',async()=>{
+ let sent;const c=client({live:true,fetcher:async(url,opts)=>{sent=opts;return Response.json({ok:true,id:'VG-000000000001',photoCount:0})}});
+ c.run("S.w=newW('trash');Object.assign(S.w,{addr:'Минск, Ленина 1',phone:'+375291234567'});S.step=2");await c.run('submitOrder()');
+ assert.equal(sent.headers['X-Telegram-Init-Data'],'signed-test-data');
+});
+test('security: ambiguous upload opens the saved delivery status instead of inviting a new order',async()=>{
+ const c=client({live:true,fetcher:async(url)=>url.endsWith('/get')?Response.json({ok:true,order:{serverId:'VG-000000000001',requestId:'request-1234567890',sv:'trash',date:'',status:'sent',businessStatus:'delivery_pending',deliveryState:'uncertain',addr:'Минск, Ленина 1'}}):Response.json({ok:false,code:'UNCERTAIN',message:'Проверяем доставку'},{status:409})});
+ c.run("S.w=newW('trash');Object.assign(S.w,{addr:'Минск, Ленина 1',phone:'+375291234567'});S.step=2");await c.run('submitOrder()');
+ assert.equal(c.run('S.w'),null);assert.equal(c.run('S.tab'),'done');assert.equal(c.run('S.last.businessStatus'),'delivery_pending');assert.match(c.node('#view').innerHTML,/Проверяем доставку/);assert(!c.node('#view').innerHTML.includes('data-a="retry-delivery"'));
+});
+test('security: retrying known undelivered card preserves original request ID and asks for lost photos',()=>{
+ const c=client({live:true});
+ c.run("S.orders=[{id:'saved',ownerId:'42',status:'sent',deliveryState:'received',serverId:'VG-000000000001',requestId:'original-request-123',sv:'trash',date:'',addr:'Минск, Ленина 1',photoCount:2}];retryDelivery('saved')");
+ assert.equal(c.run('S.w.submitId'),'original-request-123');assert.equal(c.run('S.w.photos.length'),0);assert.match(c.run('S.photoError'),/заново/);
+});
+test('security: pagination loads older remote orders and deep link looks up owner-specific record',async()=>{
+ const row=n=>({serverId:'VG-'+String(n).padStart(12,'0'),requestId:'request-for-order-'+n,status:'sent',sv:'trash',date:'',desc:'Order '+n,businessStatus:'received'});
+ const calls=[];const c=client({live:true,fetcher:async(url,opts)=>{
+  const body=JSON.parse(opts.body);calls.push({url,body});
+  if(url.endsWith('/get'))return Response.json({ok:true,order:row(500)});
+  return Response.json({ok:true,orders:body.cursor?[row(101)]:Array.from({length:100},(_,i)=>row(i+1)),nextCursor:body.cursor?null:'next-page'});
+ }});
+ c.run('statusPageCount=2');await c.run('syncOrders()');assert.equal(c.run('S.orders.length'),101);assert.equal(c.run('statusNextCursor'),null);assert.equal(calls[1].body.cursor,'next-page');
+ c.run("statusPageCount=1;pendingOrderId='VG-000000000500'");await c.run('syncOrders()');assert.equal(c.run('S.last.serverId'),'VG-000000000500');assert.equal(c.run('S.tab'),'done');assert(calls.some(c=>c.url.endsWith('/get')));
 });

@@ -1,12 +1,15 @@
 import {createStatusService,statusKeyboard,compactCaption} from './statuses.mjs';
+import {consumeLimit,entryLimit} from './security.mjs';
 // HTTP/FormData + Telegram API. Only persistence and env bindings are Cloudflare-specific.
 const MAX_BODY = 12 * 1024 * 1024;
 const MAX_PHOTO = 2 * 1024 * 1024;
 const names = {trash:'Вывоз мусора',construction:'Вывоз строительного мусора',furniture:'Вывоз старой мебели',flat:'Квартирный переезд',office:'Офисный переезд',load:'Услуги грузчиков',rig:'Такелаж',dem:'Демонтаж'};
+const enabledServices=new Set(['trash','construction','furniture','dem']);
+const rateError=e=>{throw new HttpError(e.status,e.code,e.message,{retryAfter:e.retryAfter})};
 const slots = ['По согласованию','Утро: 8:00–12:00','День: 12:00–17:00','Вечер: 17:00–21:00'];
 const enc = new TextEncoder();
 class HttpError extends Error {
-  constructor(status, code, message) { super(message); this.status=status; this.code=code; }
+  constructor(status, code, message, details={}) { super(message); this.status=status; this.code=code; Object.assign(this,details); }
 }
 const fail = (status,code,message) => {throw new HttpError(status,code,message)};
 const hex = bytes => Array.from(new Uint8Array(bytes),x=>x.toString(16).padStart(2,'0')).join('');
@@ -34,8 +37,10 @@ export function validateOrder(raw){
   if(!raw||typeof raw!=='object'||Array.isArray(raw))fail(400,'ORDER','Проверьте данные заявки.');
   const text=(key,max,required=false)=>{
     const v=raw[key];
-    if(typeof v!=='string'||v.length>max||(required&&v.trim().length<5))fail(400,'ORDER','Проверьте адрес и данные заявки.');
-    return v.trim().replace(/[\x00-\x08\x0b\x0c\x0e-\x1f]/g,'');
+    if(typeof v!=='string'||v.length>max)fail(400,'ORDER','Проверьте адрес и данные заявки.');
+    const clean=v.replace(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/g,'').replace(/\s+/g,' ').trim();
+    if(required&&clean.length<5)fail(400,'ORDER','Проверьте адрес и данные заявки.');
+    return clean;
   };
   if(!Object.hasOwn(names,raw.sv))fail(400,'ORDER','Выберите услугу.');
   const w={sv:raw.sv,desc:text('desc',1000),addr:text('addr',220,true),to:text('to',220,raw.sv==='flat'||raw.sv==='office'),name:raw.name===undefined?'':text('name',60),phone:text('phone',25)};
@@ -99,6 +104,8 @@ export function orderMessage(w,id,user,photoCount){
 }
 // A definitive Telegram error is safe to retry; a lost network response is ambiguous.
 async function telegram(env,method,body){
+  await consumeLimit(env,'telegram:global',300,60000,rateError);
+  if(['sendMessage','sendPhoto','sendMediaGroup'].includes(method))await consumeLimit(env,'telegram:send',60,60000,rateError);
   let response,data;
   const actualBody=[...body.values()].some(v=>v instanceof Blob)?body:new URLSearchParams([...body.entries()]);
   try{response=await fetch(`https://api.telegram.org/bot${env.BOT_TOKEN}/${method}`,{method:'POST',body:actualBody,signal:AbortSignal.timeout(25000)})}
@@ -108,7 +115,7 @@ async function telegram(env,method,body){
   if(data.ok!==true){
     if(method.startsWith('editMessage')&&Number(data.error_code)===400&&/message is not modified/i.test(String(data.description||'')))return true;
     if(response.status>=500||Number(data.error_code)>=500)throw new HttpError(409,'UNCERTAIN','Не удалось подтвердить доставку. Заявка требует проверки.');
-    throw new HttpError(502,'DELIVERY','Не удалось отправить заявку. Попробуйте ещё раз позже.');
+    throw new HttpError(502,'DELIVERY','Не удалось отправить заявку. Попробуйте ещё раз позже.',{telegramCode:Number(data.error_code)||response.status,retryAfter:Math.min(3600,Math.max(10,Number(data.parameters?.retry_after)||10))});
   }
   return data.result;
 }
@@ -121,7 +128,10 @@ async function dispatch(env,row,w,user,photos){
   if(['sending_text','sending_photos','uncertain'].includes(row.state))fail(409,'UNCERTAIN','Эта заявка уже отправляется или требует проверки доставки. Не создавайте её повторно.');
   let state=row.state,messageId=row.message_id;
   if(state==='received'){
-    const lock=await stmt(env,"UPDATE orders SET state='sending_text', updated_at=? WHERE id=? AND state='received'",Date.now(),row.id).run();
+    if(row.delivery_next_at>Date.now())throw new HttpError(429,'RATE','Подождите перед повторной отправкой.',{retryAfter:Math.ceil((row.delivery_next_at-Date.now())/1000)});
+    if(row.delivery_attempts>=5)fail(429,'ATTEMPTS','Лимит попыток исчерпан. Обратитесь к менеджеру для проверки заявки.');
+    await consumeLimit(env,'delivery:user:'+row.user_id,20,3600000,rateError);
+    const lock=await stmt(env,"UPDATE orders SET state='sending_text',delivery_attempts=delivery_attempts+1, updated_at=? WHERE id=? AND state='received' AND delivery_next_at<=? AND delivery_attempts<5 AND fingerprint=?",Date.now(),row.id,Date.now(),row.fingerprint).run();
     if(!lock.meta.changes)fail(409,'BUSY','Заявка уже отправляется. Подождите немного.');
     const base=orderMessage(w,row.id,user,photos.length),kind=photos.length>1?'album':photos.length?'photo':'text';
     const form=bodyFor(env);form.set('protect_content','true');
@@ -135,9 +145,10 @@ async function dispatch(env,row,w,user,photos){
       })));
     }
     if(kind!=='album')form.set('reply_markup',JSON.stringify(statusKeyboard({...row,message_kind:kind})));
+    await stmt(env,'UPDATE orders SET manager_text=?,message_kind=? WHERE id=?',base,kind,row.id).run();
     let result;
     try{result=await telegram(env,kind==='text'?'sendMessage':kind==='photo'?'sendPhoto':'sendMediaGroup',form)}
-    catch(e){await stmt(env,'UPDATE orders SET state=?,updated_at=? WHERE id=?',e.code==='DELIVERY'?'received':'uncertain',Date.now(),row.id).run();throw e}
+    catch(e){await stmt(env,'UPDATE orders SET state=?,updated_at=?,delivery_next_at=? WHERE id=?',['DELIVERY','RATE'].includes(e.code)?'received':'uncertain',Date.now(),Date.now()+Math.max(10,e.retryAfter||10)*1000,row.id).run();throw e}
     const messages=Array.isArray(result)?result:[result];
     messageId=messages[0].message_id;state='sent';
     const ids=messages.map(m=>m.photo?.at(-1)?.file_id).filter(Boolean);
@@ -147,7 +158,9 @@ async function dispatch(env,row,w,user,photos){
   }
   // Resume pre-upgrade deliveries whose separate text message already exists.
   if(state==='text_sent'){
-    const lock=await stmt(env,"UPDATE orders SET state='sending_photos',updated_at=? WHERE id=? AND state='text_sent'",Date.now(),row.id).run();
+    if(row.delivery_next_at>Date.now()||row.delivery_attempts>=5)fail(429,'RATE','Повторная отправка фото временно ограничена.');
+    await consumeLimit(env,'delivery:user:'+row.user_id,20,3600000,rateError);
+    const lock=await stmt(env,"UPDATE orders SET state='sending_photos',delivery_attempts=delivery_attempts+1,updated_at=? WHERE id=? AND state='text_sent' AND delivery_next_at<=? AND delivery_attempts<5 AND fingerprint=?",Date.now(),row.id,Date.now(),row.fingerprint).run();
     if(!lock.meta.changes)fail(409,'BUSY','Фотографии уже отправляются.');
     const form=bodyFor(env);form.set('protect_content','true');form.set('reply_parameters',JSON.stringify({message_id:messageId}));
     if(photos.length===1){form.set('photo',photos[0],'photo.jpg');form.set('caption',`Фото к заявке ${row.id}`)}
@@ -157,7 +170,7 @@ async function dispatch(env,row,w,user,photos){
     }
     let result;
     try{result=await telegram(env,photos.length===1?'sendPhoto':'sendMediaGroup',form)}
-    catch(e){await stmt(env,'UPDATE orders SET state=?,updated_at=? WHERE id=?',e.code==='DELIVERY'?'text_sent':'uncertain',Date.now(),row.id).run();if(e.code==='DELIVERY')e.message='Заявка доставлена, фотографии — нет. Нажмите повторно: отправим только фото.';throw e}
+    catch(e){await stmt(env,'UPDATE orders SET state=?,updated_at=?,delivery_next_at=? WHERE id=?',['DELIVERY','RATE'].includes(e.code)?'text_sent':'uncertain',Date.now(),Date.now()+Math.max(10,e.retryAfter||10)*1000,row.id).run();if(e.code==='DELIVERY')e.message='Заявка доставлена, фотографии — нет. Нажмите повторно: отправим только фото.';throw e}
     const messages=Array.isArray(result)?result:[result];
     const ids=messages.map(m=>m.photo?.at(-1)?.file_id).filter(Boolean);
     await stmt(env,"UPDATE orders SET state='sent',photo_file_ids=?,updated_at=? WHERE id=?",JSON.stringify(ids),Date.now(),row.id).run();
@@ -166,10 +179,13 @@ async function dispatch(env,row,w,user,photos){
   return receipt(await stmt(env,'SELECT * FROM orders WHERE id=?',row.id).first());
 }
 export default {
+  async scheduled(controller,env,ctx){
+    ctx.waitUntil((async()=>{await statusService.flushOutbox(env);await stmt(env,'DELETE FROM request_limits WHERE expires_at<?',Date.now()).run()})());
+  },
   async fetch(request,env){
     const origin=request.headers.get('origin'),allowed=env.ALLOWED_ORIGIN;
     const headers={'content-type':'application/json; charset=utf-8','cache-control':'no-store','x-content-type-options':'nosniff','vary':'Origin'};
-    if(origin&&origin===allowed){headers['access-control-allow-origin']=origin;headers['access-control-allow-methods']='POST, GET, OPTIONS';headers['access-control-allow-headers']='Content-Type'}
+    if(origin&&origin===allowed){headers['access-control-allow-origin']=origin;headers['access-control-allow-methods']='POST, GET, OPTIONS';headers['access-control-allow-headers']='Content-Type, X-Telegram-Init-Data'}
     const json=(data,status=200)=>new Response(JSON.stringify(data),{status,headers});
     try{
       const path=new URL(request.url).pathname;
@@ -181,22 +197,30 @@ export default {
       }
       if(!allowed||origin!==allowed)fail(403,'ORIGIN','Откройте мини-приложение через Telegram.');
       if(request.method==='OPTIONS')return new Response(null,{status:204,headers});
-      if(!['/api/orders','/api/orders/list','/api/contact','/api/orders/decision','/api/orders/organize'].includes(path))fail(404,'NOT_FOUND','Не найдено.');
+      if(!['/api/orders','/api/orders/list','/api/contact','/api/orders/decision','/api/orders/organize','/api/orders/get'].includes(path))fail(404,'NOT_FOUND','Не найдено.');
       if(request.method!=='POST')fail(405,'METHOD','Метод не поддерживается.');
       if(!env.DB||!env.BOT_TOKEN||!env.TELEGRAM_CHAT_ID)fail(503,'SETUP','Приём заявок ещё настраивается. Попробуйте позже.');
-      if(path==='/api/orders/list')return json(await statusService.list(request,env,validateInitData));
-      if(path==='/api/orders/decision')return json(await statusService.decision(request,env,validateInitData));
-      if(path==='/api/orders/organize')return json(await statusService.organize(request,env,validateInitData));
-      if(path==='/api/contact')return json(await statusService.contact(request,env,validateInitData));
-      const form=await boundedForm(request),user=await validateInitData(form.get('initData'),env.BOT_TOKEN);
+      await entryLimit(request,env,rateError);
+      const authenticate=async(raw,token)=>{const user=await validateInitData(raw,token);await consumeLimit(env,'api:user:'+user.id,120,60000,rateError);return user};
+      if(path==='/api/orders/get')return json(await statusService.get(request,env,authenticate));
+      if(path==='/api/orders/list')return json(await statusService.list(request,env,authenticate));
+      if(path==='/api/orders/decision')return json(await statusService.decision(request,env,authenticate));
+      if(path==='/api/orders/organize')return json(await statusService.organize(request,env,authenticate));
+      if(path==='/api/contact')return json(await statusService.contact(request,env,authenticate));
+      // Authenticate before buffering/parsing photos. Old clients must reload.
+      const signed=request.headers.get('X-Telegram-Init-Data'),user=await authenticate(signed,env.BOT_TOKEN);
+      await consumeLimit(env,'upload:user:'+user.id,30,60000,rateError);
+      const form=await boundedForm(request);
+      if(form.has('initData')&&form.get('initData')!==signed)fail(401,'AUTH','Откройте приложение заново через Telegram.');
       const requestId=form.get('requestId');
       if(typeof requestId!=='string'||!/^[a-zA-Z0-9_-]{16,80}$/.test(requestId))fail(400,'ID','Неверный номер запроса.');
       let raw;try{raw=JSON.parse(form.get('order'))}catch{fail(400,'ORDER','Не удалось прочитать заявку.')}
       const w=validateOrder(raw),photos=form.getAll('photos');await validatePhotos(photos);
-      w.name=String(user.first_name||'').slice(0,60);
+      w.name=String(user.first_name||'').replace(/[\x00-\x1f\x7f]/g,' ').replace(/\s+/g,' ').trim().slice(0,60);
       const hashes=await Promise.all(photos.map(async p=>hex(await crypto.subtle.digest('SHA-256',await p.arrayBuffer()))));
       const fingerprint=hex(await crypto.subtle.digest('SHA-256',enc.encode(JSON.stringify([w,hashes]))));
       let row=await stmt(env,'SELECT * FROM orders WHERE user_id=? AND request_id=?',String(user.id),requestId).first();
+      if(!enabledServices.has(w.sv)&&!(row?.state==='sent'&&row.fingerprint===fingerprint))fail(400,'SERVICE_PAUSED','Эта услуга временно недоступна. Выберите другую.');
       if(!row){
         const count=await stmt(env,'SELECT COUNT(*) AS n FROM orders WHERE user_id=? AND created_at>?',String(user.id),Date.now()-3600000).first();
         if(count.n>=10)fail(429,'RATE','Слишком много заявок. Попробуйте позже.');
@@ -205,13 +229,21 @@ export default {
         row=await stmt(env,'SELECT * FROM orders WHERE user_id=? AND request_id=?',String(user.id),requestId).first();
         if(!row)fail(429,'RATE','Слишком много заявок. Попробуйте позже.');
       }
-      if(row.fingerprint!==fingerprint)fail(409,'CHANGED','Заявка уже передана с другими данными. Создайте новую заявку.');
-      const result=await dispatch(env,row,w,user,photos);
-      await statusService.saveContact(env,user,w.phone);
+      if(row.fingerprint!==fingerprint){
+        // Only a proven undelivered card may be edited. Attempts and ID are preserved.
+        const changed=await stmt(env,"UPDATE orders SET fingerprint=?,payload=?,photo_count=?,updated_at=? WHERE id=? AND fingerprint=? AND state='received' AND message_id IS NULL",fingerprint,JSON.stringify(w),photos.length,Date.now(),row.id,row.fingerprint).run();
+        if(!changed.meta.changes)throw new HttpError(409,'CHANGED','Заявка уже передана с другими данными. Откройте её статус перед созданием новой.',{id:row.id});
+        row=await stmt(env,'SELECT * FROM orders WHERE id=?',row.id).first();
+        if(row.fingerprint!==fingerprint)fail(409,'BUSY','Данные заявки уже изменились. Обновите её перед отправкой.');
+      }
+      let result;
+      try{result=await dispatch(env,row,w,user,photos)}catch(e){e.id=row.id;throw e}
+      await statusService.saveContact(env,user,w.phone,row.created_at,'order');
       return json(result);
     }catch(e){
       // Never log request bodies, Telegram URLs (bot token), or user contact details.
-      return json({ok:false,code:e instanceof HttpError?e.code:'INTERNAL',message:e instanceof HttpError?e.message:'Не удалось подтвердить отправку. Данные сохранены; попробуйте позже.'},e instanceof HttpError?e.status:500);
+      if(e instanceof HttpError&&e.retryAfter)headers['retry-after']=String(e.retryAfter);
+      return json({ok:false,code:e instanceof HttpError?e.code:'INTERNAL',message:e instanceof HttpError?e.message:'Не удалось подтвердить отправку. Данные сохранены; попробуйте позже.',...(e instanceof HttpError&&e.id?{id:e.id}:{}),...(e instanceof HttpError&&e.retryAfter?{retryAfter:e.retryAfter}:{})},e instanceof HttpError?e.status:500);
     }
   }
 };

@@ -1,3 +1,4 @@
+import {createOutbox} from './outbox.mjs';
 // Telegram media captions have a 1024-character limit. Keep every line represented;
 // the full original remains in D1 and is available via the manager's details button.
 export function compactCaption(text){
@@ -30,6 +31,7 @@ export function statusKeyboard(row,confirmCancel=false){
  return {inline_keyboard:[buttons,[{text:'Закрыть заявку',callback_data:data('ask_cancel')}],...details]};
 }
 export function createStatusService({telegram,stmt,fail}){
+  const outbox=createOutbox({stmt,telegram,edit});
   async function smallJson(request){
     const reader=request.body?.getReader();if(!reader)fail(400,'FORMAT','Пустой запрос.');
     const chunks=[];let n=0;
@@ -48,16 +50,31 @@ export function createStatusService({telegram,stmt,fail}){
     ]);
   }
   function publicOrder(row,events=[]){return {
-   ...JSON.parse(row.payload),serverId:row.id,requestId:row.request_id,status:'sent',businessStatus:row.business_status,
-   statusVersion:row.business_version,statusUpdatedAt:row.status_updated_at,createdAt:row.created_at,photoCount:row.photo_count,
+   ...JSON.parse(row.payload),serverId:row.id,requestId:row.request_id,status:'sent',deliveryState:row.state,businessStatus:row.state==='sent'?row.business_status:['received','text_sent'].includes(row.state)?'delivery_retry':'delivery_pending',
+   deliveryAttempts:row.delivery_attempts,deliveryRetryAt:row.delivery_next_at,statusVersion:row.business_version,statusUpdatedAt:row.status_updated_at,createdAt:row.created_at,photoCount:row.photo_count,
    quote:row.quote_amount_minor?{amountMinor:row.quote_amount_minor,currency:'BYN',note:row.quote_note,revision:row.quote_revision}:null,
    customerNote:row.customer_note||'',customerVisibility:row.customer_visibility||'active',history:events.filter(e=>e.order_id===row.id).map(e=>({status:e.status,at:e.changed_at})).reverse()
   }}
   async function list(request,env,validateInitData){
    const data=await smallJson(request),user=await validateInitData(data.initData,env.BOT_TOKEN);
-   const rows=(await stmt(env,"SELECT * FROM orders WHERE user_id=? AND state='sent' AND customer_visibility!='deleted' ORDER BY CASE customer_visibility WHEN 'active' THEN 0 ELSE 1 END,created_at DESC LIMIT 100",String(user.id)).all()).results;
-   const events=(await stmt(env,'SELECT e.* FROM order_status_events e JOIN orders o ON o.id=e.order_id WHERE o.user_id=? ORDER BY e.changed_at DESC LIMIT 300',String(user.id)).all()).results;
-   return {ok:true,orders:rows.map(row=>publicOrder(row,events))};
+   let cursor=null;
+   if(data.cursor!==undefined&&data.cursor!==null){
+    if(typeof data.cursor!=='string'||data.cursor.length>160)fail(400,'CURSOR','Неверная страница.');
+    try{cursor=JSON.parse(atob(data.cursor))}catch{fail(400,'CURSOR','Неверная страница.')}
+    if(!Array.isArray(cursor)||cursor.length!==2||!Number.isSafeInteger(cursor[0])||typeof cursor[1]!=='string'||!/^VG-[A-F0-9]{12}$/.test(cursor[1]))fail(400,'CURSOR','Неверная страница.');
+   }
+   const rows=(await stmt(env,"SELECT * FROM orders WHERE user_id=? AND (state IN ('sent','uncertain','sending_text','sending_photos','text_sent') OR (state='received' AND (delivery_attempts>0 OR delivery_next_at>0))) AND customer_visibility!='deleted' AND (? IS NULL OR created_at<? OR (created_at=? AND id<?)) ORDER BY created_at DESC,id DESC LIMIT 101",String(user.id),cursor?.[0]??null,cursor?.[0]??0,cursor?.[0]??0,cursor?.[1]??'').all()).results;
+   const more=rows.length>100,page=rows.slice(0,100),last=page.at(-1);
+   const events=page.length?(await stmt(env,'SELECT * FROM order_status_events WHERE order_id IN ('+page.map(()=>'?').join(',')+') ORDER BY changed_at DESC',...page.map(r=>r.id)).all()).results:[];
+   return {ok:true,orders:page.map(row=>publicOrder(row,events)),nextCursor:more?btoa(JSON.stringify([last.created_at,last.id])):null};
+  }
+  async function get(request,env,validateInitData){
+   const data=await smallJson(request),user=await validateInitData(data.initData,env.BOT_TOKEN);
+   if(!(typeof data.id==='string'&&/^VG-[A-F0-9]{12}$/.test(data.id))&&!(typeof data.requestId==='string'&&/^[a-zA-Z0-9_-]{16,80}$/.test(data.requestId)))fail(400,'ID','Неверный номер заявки.');
+   const row=await stmt(env,'SELECT * FROM orders WHERE user_id=? AND '+(data.id?'id=?':'request_id=?')+" AND customer_visibility!='deleted'",String(user.id),data.id||data.requestId).first();
+   if(!row)fail(404,'NOT_FOUND','Заявка не найдена.');
+   const events=(await stmt(env,'SELECT * FROM order_status_events WHERE order_id=? ORDER BY changed_at DESC',row.id).all()).results;
+   return {ok:true,order:publicOrder(row,events)};
   }
   async function contact(request,env,validateInitData){
     const data=await smallJson(request),user=await validateInitData(data.initData,env.BOT_TOKEN);
@@ -71,8 +88,10 @@ export function createStatusService({telegram,stmt,fail}){
     const row=await stmt(env,'SELECT phone,updated_at FROM customer_contacts WHERE user_id=?',String(user.id)).first();
     return {ok:true,phone:row?.phone||'',updatedAt:row?.updated_at||0,serverTime:Date.now()};
   }
-  async function saveContact(env,user,phone){
-    await stmt(env,'INSERT INTO customer_contacts(user_id,phone,first_name,updated_at) VALUES(?,?,?,?) ON CONFLICT(user_id) DO UPDATE SET phone=excluded.phone,first_name=excluded.first_name,updated_at=excluded.updated_at',String(user.id),phone,String(user.first_name||'').slice(0,60),Date.now()).run();
+  async function saveContact(env,user,phone,at=Date.now(),source='telegram'){
+    await stmt(env,`INSERT INTO customer_contacts(user_id,phone,first_name,updated_at,source) VALUES(?,?,?,?,?)
+     ON CONFLICT(user_id) DO UPDATE SET phone=excluded.phone,first_name=excluded.first_name,updated_at=excluded.updated_at,source=excluded.source
+     WHERE excluded.updated_at>customer_contacts.updated_at OR (excluded.updated_at=customer_contacts.updated_at AND excluded.source='telegram' AND customer_contacts.source!='telegram')`,String(user.id),phone,String(user.first_name||'').slice(0,60),at,source).run();
   }
   async function admin(env,id){
    const f=new FormData();f.set('chat_id',env.TELEGRAM_CHAT_ID);f.set('user_id',String(id));
@@ -112,19 +131,24 @@ export function createStatusService({telegram,stmt,fail}){
    const quote=parseQuote(message.text);
    if(!quote){await reply(env,message,'Укажите сумму в BYN первой строкой, например 150. Следующими строками — что входит в стоимость и условия (до 600 символов). Ответьте ещё раз на сообщение с запросом цены.');return}
    const eventId='quote:'+message.message_id,now=Date.now();
+   let notice=null;
+   if(env.MINI_APP_URL||/^[A-Za-z0-9_]+$/.test(env.BOT_USERNAME||'')){
+    const button={text:'Посмотреть предложение'};
+    if(env.MINI_APP_URL){const url=new URL(env.MINI_APP_URL);url.searchParams.set('order',row.id);button.web_app={url:url.href}}
+    else button.url=`https://t.me/${env.BOT_USERNAME}?startapp=order_${row.id}`;
+    notice={chat_id:row.user_id,text:`Расчёт готов: ${money(quote.amount)}${quote.note?'\n'+quote.note:''}\nПосмотрите предложение в приложении — можно согласиться или уточнить условия.`,reply_markup:{inline_keyboard:[[button]]}};
+   }
    const changes=await env.DB.batch([
     stmt(env,"INSERT OR IGNORE INTO order_status_events(event_id,order_id,status,actor_id,changed_at) SELECT ?,id,'quoted',?,? FROM orders WHERE id=? AND business_version=?",eventId,String(message.from.id),now,row.id,row.business_version),
-    stmt(env,"UPDATE orders SET business_status='quoted',business_version=business_version+1,status_updated_at=?,quote_amount_minor=?,quote_note=?,quote_revision=quote_revision+1,customer_note='' WHERE id=? AND business_version=? AND EXISTS(SELECT 1 FROM order_status_events WHERE event_id=? AND order_id=orders.id)",now,quote.amount,quote.note,row.id,row.business_version,eventId)
+    stmt(env,"UPDATE orders SET business_status='quoted',business_version=business_version+1,status_updated_at=?,quote_amount_minor=?,quote_note=?,quote_revision=quote_revision+1,customer_note='' WHERE id=? AND business_version=? AND EXISTS(SELECT 1 FROM order_status_events WHERE event_id=? AND order_id=orders.id)",now,quote.amount,quote.note,row.id,row.business_version,eventId),
+    outbox.enqueue(env,eventId,row.id,'edit',{},now),
+    ...(notice?[outbox.enqueue(env,eventId,row.id,'sendMessage',notice,now)]:[])
    ]);
    if(!changes[1].meta.changes)return;
    row=await stmt(env,'SELECT * FROM orders WHERE id=?',row.id).first();
-   try{await edit(env,row)}catch{}
-   let notified=false;
-   if(env.MINI_APP_URL||/^[A-Za-z0-9_]+$/.test(env.BOT_USERNAME||'')){
-    const f=new FormData();f.set('chat_id',row.user_id);f.set('text',`Расчёт готов: ${money(quote.amount)}${quote.note?'\n'+quote.note:''}\nПосмотрите предложение в приложении — можно согласиться или уточнить условия.`);const button={text:'Посмотреть предложение'};if(env.MINI_APP_URL){const url=new URL(env.MINI_APP_URL);url.searchParams.set('order',row.id);button.web_app={url:url.href}}else button.url=`https://t.me/${env.BOT_USERNAME}?startapp=order_${row.id}`;f.set('reply_markup',JSON.stringify({inline_keyboard:[[button]]}));
-    try{await telegram(env,'sendMessage',f);notified=true}catch{}
-   }
-   await reply(env,message,notified?'Предложение сохранено, клиенту отправлено уведомление. Ждём его решения.':'Предложение сохранено в приложении. Личное уведомление не доставлено — при необходимости свяжитесь с клиентом по телефону.');
+   await outbox.flush(env,row.id);
+   const delivered=await stmt(env,"SELECT state FROM delivery_outbox WHERE id=?",eventId+':sendMessage').first();
+   await reply(env,message,delivered?.state==='sent'?'Предложение сохранено, клиенту отправлено уведомление. Ждём его решения.':'Предложение сохранено в приложении. Уведомление ожидает доставки или проверки; при необходимости свяжитесь с клиентом по телефону.');
   }
   async function decision(request,env,validateInitData){
    const data=await smallJson(request),user=await validateInitData(data.initData,env.BOT_TOKEN);
@@ -137,40 +161,43 @@ export function createStatusService({telegram,stmt,fail}){
    if(old&&(old.order_id!==row.id||old.status!==target))fail(409,'DECISION','Это действие уже использовано.');
    if(!old){
     if(row.business_status!=='quoted'||!row.quote_amount_minor||row.business_version!==data.version)fail(409,'QUOTE_CHANGED','Предложение изменилось. Обновите заявку и посмотрите актуальную цену.');
-    const now=Date.now();const changes=await env.DB.batch([
+    const now=Date.now(),payload=JSON.parse(row.payload),username=/^[A-Za-z0-9_]{5,32}$/.test(user.username||'')?user.username:'';
+    const contact=`\n\nТелефон: ${payload.phone}${username?'\nTelegram: @'+username:''}`;
+    const text=data.action==='accept'?`Клиент принял стоимость ${money(row.quote_amount_minor)} по заявке ${row.id}.\nСвяжитесь с ним для согласования времени.`:`Клиент просит уточнить условия по заявке ${row.id}.${note?'\n'+note:''}`;
+    const notice={chat_id:env.TELEGRAM_CHAT_ID,text:text+contact,reply_parameters:{message_id:row.message_id},reply_markup:{inline_keyboard:[[{text:'Написать клиенту в Telegram',url:username?'https://t.me/'+username:'tg://user?id='+row.user_id}]]}};
+    const changes=await env.DB.batch([
      stmt(env,"INSERT OR IGNORE INTO order_status_events(event_id,order_id,status,actor_id,changed_at) SELECT ?,id,?,?,? FROM orders WHERE id=? AND user_id=? AND business_version=? AND business_status='quoted'",eventId,target,String(user.id),now,row.id,String(user.id),data.version),
-     stmt(env,"UPDATE orders SET business_status=?,business_version=business_version+1,status_updated_at=?,customer_note=? WHERE id=? AND user_id=? AND business_version=? AND business_status='quoted' AND EXISTS(SELECT 1 FROM order_status_events WHERE event_id=? AND order_id=orders.id AND status=?)",target,now,note,row.id,String(user.id),data.version,eventId,target)
+     stmt(env,"UPDATE orders SET business_status=?,business_version=business_version+1,status_updated_at=?,customer_note=? WHERE id=? AND user_id=? AND business_version=? AND business_status='quoted' AND EXISTS(SELECT 1 FROM order_status_events WHERE event_id=? AND order_id=orders.id AND status=?)",target,now,note,row.id,String(user.id),data.version,eventId,target),
+     outbox.enqueue(env,eventId,row.id,'edit',{},now),
+     outbox.enqueue(env,eventId,row.id,'sendMessage',notice,now)
     ]);
     if(!changes[1].meta.changes)fail(409,'QUOTE_CHANGED','Предложение уже обновлено.');
     row=await stmt(env,'SELECT * FROM orders WHERE id=?',row.id).first();
-    try{await edit(env,row)}catch{}
-    const payload=JSON.parse(row.payload),username=/^[A-Za-z0-9_]{5,32}$/.test(user.username||'')?user.username:'';
-    const contact=`\n\nТелефон: ${payload.phone}${username?'\nTelegram: @'+username:''}`;
-    const text=data.action==='accept'?`Клиент принял стоимость ${money(row.quote_amount_minor)} по заявке ${row.id}.\nСвяжитесь с ним для согласования времени.`:`Клиент просит уточнить условия по заявке ${row.id}.${note?'\n'+note:''}`;
-    const markup={inline_keyboard:[[{text:'Написать клиенту в Telegram',url:username?'https://t.me/'+username:'tg://user?id='+row.user_id}]]};
-    await reply(env,{message_id:row.message_id},text+contact,markup);
    }
+   await outbox.flush(env,row.id);
    const events=(await stmt(env,'SELECT * FROM order_status_events WHERE order_id=? ORDER BY changed_at DESC',row.id).all()).results;
    return {ok:true,order:publicOrder(row,events)};
   }
   async function organize(request,env,validateInitData){
    const data=await smallJson(request),user=await validateInitData(data.initData,env.BOT_TOKEN);
    if(!['archive','restore','delete','cancel'].includes(data.action)||typeof data.id!=='string')fail(400,'ACTION','Недоступное действие.');
-   let row=await stmt(env,"SELECT * FROM orders WHERE id=? AND user_id=? AND state='sent'",data.id,String(user.id)).first();
+   let row=await stmt(env,"SELECT * FROM orders WHERE id=? AND user_id=? ",data.id,String(user.id)).first();
    if(!row)fail(404,'NOT_FOUND','Заявка не найдена.');
+   if(data.action==='cancel'&&row.state!=='sent')fail(409,'DELIVERY_PENDING','Сначала необходимо проверить доставку заявки.');
    if(data.action==='cancel'&&row.business_status!=='cancelled'){
     if(!['received','processing','quoted','discussion','accepted'].includes(row.business_status))fail(409,'CANNOT_CANCEL','Эту оценку уже нельзя отменить в приложении.');
     if(data.version!==row.business_version)fail(409,'STALE','Заявка обновилась. Обновите список и повторите действие.');
     const eventId='customer-cancel:'+row.id+':'+row.business_version,now=Date.now();
     const changes=await env.DB.batch([
      stmt(env,"INSERT OR IGNORE INTO order_status_events(event_id,order_id,status,actor_id,changed_at) SELECT ?,id,'cancelled',?,? FROM orders WHERE id=? AND user_id=? AND business_version=?",eventId,String(user.id),now,row.id,String(user.id),data.version),
-     stmt(env,"UPDATE orders SET business_status='cancelled',business_version=business_version+1,status_updated_at=?,customer_visibility='archived' WHERE id=? AND user_id=? AND business_version=? AND EXISTS(SELECT 1 FROM order_status_events WHERE event_id=? AND order_id=orders.id)",now,row.id,String(user.id),data.version,eventId)
+     stmt(env,"UPDATE orders SET business_status='cancelled',business_version=business_version+1,status_updated_at=?,customer_visibility=CASE WHEN customer_visibility='deleted' THEN 'deleted' ELSE 'archived' END WHERE id=? AND user_id=? AND business_version=? AND EXISTS(SELECT 1 FROM order_status_events WHERE event_id=? AND order_id=orders.id)",now,row.id,String(user.id),data.version,eventId),
+     outbox.enqueue(env,eventId,row.id,'edit',{},now),
+     outbox.enqueue(env,eventId,row.id,'sendMessage',{chat_id:env.TELEGRAM_CHAT_ID,text:'Клиент отменил запрос на оценку '+row.id+'.',reply_parameters:{message_id:row.message_id}},now)
     ]);
     if(!changes[1].meta.changes)fail(409,'STALE','Заявка уже обновилась.');
     row=await stmt(env,'SELECT * FROM orders WHERE id=?',row.id).first();
-    try{await edit(env,row)}catch{}
-    await reply(env,{message_id:row.message_id},'Клиент отменил запрос на оценку '+row.id+'.');
-   }else if(data.action!=='cancel'){
+    await outbox.flush(env,row.id);
+   }else if(data.action==='cancel'){await outbox.flush(env,row.id)}else{
     const visibility={archive:'archived',restore:'active',delete:'deleted'}[data.action];
     await stmt(env,'UPDATE orders SET customer_visibility=? WHERE id=? AND user_id=?',visibility,row.id,String(user.id)).run();
     row={...row,customer_visibility:visibility};
@@ -236,17 +263,48 @@ export function createStatusService({telegram,stmt,fail}){
     const now=Date.now();
     await env.DB.batch([
       stmt(env,'INSERT OR IGNORE INTO order_status_events(event_id,order_id,status,actor_id,changed_at) SELECT ?,id,?,?,? FROM orders WHERE id=? AND business_version=? AND business_status=? AND state=\'sent\'',q.id,action,String(q.from.id),now,id,version,row.business_status),
-      stmt(env,"UPDATE orders SET business_status=?,business_version=business_version+1,status_updated_at=?,customer_visibility=CASE WHEN customer_visibility='deleted' THEN 'deleted' WHEN ?='cancelled' THEN 'archived' ELSE customer_visibility END WHERE id=? AND business_version=? AND business_status=? AND EXISTS(SELECT 1 FROM order_status_events WHERE event_id=? AND order_id=orders.id AND status=?)",action,now,action,id,version,row.business_status,q.id,action)
+      stmt(env,"UPDATE orders SET business_status=?,business_version=business_version+1,status_updated_at=?,customer_visibility=CASE WHEN customer_visibility='deleted' THEN 'deleted' WHEN ?='cancelled' THEN 'archived' ELSE customer_visibility END WHERE id=? AND business_version=? AND business_status=? AND EXISTS(SELECT 1 FROM order_status_events WHERE event_id=? AND order_id=orders.id AND status=?)",action,now,action,id,version,row.business_status,q.id,action),
+      outbox.enqueue(env,q.id,id,'edit',{},now)
     ]);
     row=await stmt(env,'SELECT * FROM orders WHERE id=?',id).first();
-    // Persist first: even if Telegram cannot edit the message, the app sees the actual status.
-    try{await edit(env,row,q.message)}catch{}
+    await outbox.flush(env,row.id);
     await answer('Статус: '+STATUS_LABELS[row.business_status]);return {ok:true};
   }
   async function setup(request,env){
     const key=request.headers.get('authorization')?.replace(/^Bearer /,'');
     if(!secretMatches(key,env.ADMIN_SETUP_SECRET))fail(403,'SETUP_AUTH','Доступ запрещён.');
     const body=await smallJson(request);
+    if(body.action==='deliveries'){
+      const now=Date.now();
+      return {ok:true,orders:(await stmt(env,"SELECT id,state,updated_at,delivery_attempts,message_kind FROM orders WHERE state='uncertain' OR (state IN ('sending_text','sending_photos') AND updated_at<?) OR (state='received' AND delivery_attempts>=5) ORDER BY updated_at LIMIT 100",now-120000).all()).results,
+       notifications:(await stmt(env,"SELECT id,order_id,kind,state,attempts,last_error,available_at FROM delivery_outbox WHERE state IN ('pending','uncertain','failed') OR (state='sending' AND lease_until<?) ORDER BY created_at LIMIT 100",now).all()).results};
+    }
+    if(['resolve_order','resolve_notification'].includes(body.action)){
+      if(typeof body.id!=='string'||body.id.length>200||body.confirmation!==body.id||typeof body.note!=='string'||body.note.trim().length<5||body.note.length>300)fail(400,'RESOLUTION','Укажите номер, его подтверждение и результат ручной проверки.');
+      const now=Date.now(),auditId=crypto.randomUUID();
+      if(body.action==='resolve_order'){
+        if(!['delivered','not_delivered'].includes(body.outcome)||!Number.isSafeInteger(body.expectedUpdatedAt))fail(400,'RESOLUTION','Укажите результат проверки и версию записи.');
+        if(body.outcome==='delivered'&&(!Number.isSafeInteger(body.messageId)||body.messageId<=0))fail(400,'RESOLUTION','Нужен ID существующего сообщения в группе.');
+        const changes=await env.DB.batch([
+          stmt(env,`INSERT INTO delivery_resolutions(id,order_id,outcome,note,created_at) SELECT ?,id,?,?,? FROM orders WHERE id=? AND updated_at=? AND (state='uncertain' OR (state IN ('sending_text','sending_photos') AND updated_at<?) OR (state='received' AND delivery_attempts>=5))`,auditId,body.outcome,body.note.trim(),now,body.id,body.expectedUpdatedAt,now-120000),
+          stmt(env,`UPDATE orders SET state=CASE WHEN ?='delivered' THEN 'sent' WHEN message_id IS NOT NULL THEN 'text_sent' ELSE 'received' END,message_id=CASE WHEN ?='delivered' THEN ? ELSE message_id END,updated_at=?,delivery_attempts=0,delivery_next_at=?,buttons_version=0 WHERE id=? AND updated_at=? AND EXISTS(SELECT 1 FROM delivery_resolutions WHERE id=? AND order_id=orders.id)`,body.outcome,body.outcome,body.messageId||null,now,now,body.id,body.expectedUpdatedAt,auditId)
+        ]);
+        if(!changes[1].meta.changes)fail(409,'STALE','Запись уже изменилась или ещё отправляется.');
+        if(body.outcome==='delivered'){
+          await received(env,body.id);
+          await env.DB.batch([outbox.enqueue(env,'received:'+body.id,body.id,'edit',{},now)]);
+          await outbox.flush(env,body.id);
+        }
+      }else{
+        if(!['delivered','not_delivered'].includes(body.outcome))fail(400,'RESOLUTION','Укажите результат сверки уведомления.');
+        const changes=await env.DB.batch([
+          stmt(env,"INSERT INTO delivery_resolutions(id,order_id,task_id,outcome,note,created_at) SELECT ?,order_id,id,?,?,? FROM delivery_outbox WHERE id=? AND (state IN ('uncertain','failed') OR (state='sending' AND lease_until<?))",auditId,body.outcome,body.note.trim(),now,body.id,now),
+          stmt(env,"UPDATE delivery_outbox SET state=?,available_at=?,lease_token='',lease_until=0,last_error='',attempts=0 WHERE id=? AND EXISTS(SELECT 1 FROM delivery_resolutions WHERE id=? AND task_id=delivery_outbox.id)",body.outcome==='delivered'?'sent':'pending',now,body.id,auditId)
+        ]);
+        if(!changes[1].meta.changes)fail(409,'STALE','Уведомление уже изменилось или ещё отправляется.');
+      }
+      return {ok:true};
+    }
     if(body.action==='diagnostics'){
       const info=await telegram(env,'getWebhookInfo',new FormData()),bot=await telegram(env,'getMe',new FormData());
       return {ok:true,bot:bot.username,webhookMatches:info.url===new URL('/telegram/webhook',request.url).href,pending:info.pending_update_count||0,lastError:info.last_error_message||'',lastErrorAt:info.last_error_date||0,allowedUpdates:info.allowed_updates||[],contacts:(await stmt(env,'SELECT details,updated_at FROM contact_diagnostics ORDER BY updated_at DESC LIMIT 3').all()).results};
@@ -260,6 +318,7 @@ export function createStatusService({telegram,stmt,fail}){
       const count=await stmt(env,"SELECT COUNT(*) AS n FROM orders WHERE state='sent' AND message_id IS NOT NULL AND buttons_version=0").first();
       return {ok:true,changed,failed,remaining:count.n};
     }
+    if(body.action!=='setup')fail(400,'ACTION','Неизвестное действие.');
     if(!env.TELEGRAM_WEBHOOK_SECRET)fail(503,'SETUP','Не задан секрет webhook.');
     const url=new URL('/telegram/webhook',request.url).href;
     const setupTelegram=async(method,form)=>{try{return await telegram(env,method,form)}catch(e){fail(502,'TELEGRAM_SETUP','Не удалось настроить '+method+': '+(e.safeDiagnostic||e.code||'ошибка Telegram'))}};
@@ -270,5 +329,5 @@ export function createStatusService({telegram,stmt,fail}){
     const info=await setupTelegram('getWebhookInfo',new FormData());
     return {ok:true,webhook:info.url===url,pending:info.pending_update_count||0};
   }
-  return {ensureMediaButtons,received,list,contact,saveContact,decision,organize,webhook,setup};
+  return {ensureMediaButtons,received,list,get,contact,saveContact,decision,organize,webhook,setup,flushOutbox:outbox.flush};
 }

@@ -57,6 +57,10 @@ fetch(d.url,{method:'POST',headers:{authorization:'Bearer '+d.key,'content-type'
     if not setup.get("webhook"):
         raise SystemExit("Telegram не подтвердил webhook.")
     print("Webhook подключён и подтверждён Telegram.")
+    if "--review" in sys.argv:
+        from review_deliveries import review
+        review(call)
+        return
     changed = 0
     for _ in range(20):
         batch = call({"action": "backfill"})

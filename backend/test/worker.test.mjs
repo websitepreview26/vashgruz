@@ -31,6 +31,7 @@ function env(){
   sqlite.exec(readFileSync(new URL('../migrations/0005_order_organization.sql',import.meta.url),'utf8'));
   sqlite.exec(readFileSync(new URL('../migrations/0006_media_cards.sql',import.meta.url),'utf8'));
   sqlite.exec(readFileSync(new URL('../migrations/0007_contact_diagnostics.sql',import.meta.url),'utf8'));
+  sqlite.exec(readFileSync(new URL('../migrations/0008_security.sql',import.meta.url),'utf8'));
   return {MINI_APP_URL:'https://websitepreview26.github.io/vashgruz/',BOT_USERNAME:'vash_gruz_test_bot',BOT_TOKEN:TOKEN,TELEGRAM_CHAT_ID:'-100123456789',ALLOWED_ORIGIN:ORIGIN,DB:{
     prepare(sql){return {bind(...args){return {
       sql,args,
@@ -42,9 +43,10 @@ function env(){
   },sqlite};
 }
 async function request({id=crypto.randomUUID(),data=order(),files=[],init,origin=ORIGIN}={}){
-  const form=new FormData();form.set('initData',init??await auth());form.set('requestId',id);form.set('order',JSON.stringify(data));
+  const signed=init??await auth();
+  const form=new FormData();form.set('initData',signed);form.set('requestId',id);form.set('order',JSON.stringify(data));
   files.forEach(f=>form.append('photos',f));
-  return new Request('https://api.example/api/orders',{method:'POST',headers:{origin},body:form});
+  return new Request('https://api.example/api/orders',{method:'POST',headers:{origin,'X-Telegram-Init-Data':signed},body:form});
 }
 function telegramMock(handler){
   const calls=[];
@@ -117,6 +119,7 @@ test('definitive media rejection retries the combined card without creating text
   });
   const a=await worker.fetch(await request({id,files:[photo()]}),e);assert.equal(a.status,502);
   assert.equal(e.sqlite.prepare('SELECT state FROM orders').get().state,'received');
+  e.sqlite.exec('UPDATE orders SET delivery_next_at=0');
   const b=await worker.fetch(await request({id,files:[photo()]}),e);assert.equal((await b.json()).ok,true);
   assert.deepEqual(calls.map(c=>c.method),['sendPhoto','sendPhoto']);
 });
@@ -217,7 +220,7 @@ test('simultaneous manager clicks commit a single transition',async()=>{
 });
 test('bootstrap is protected and never overwrites an unrelated webhook',async()=>{
  const e={...env(),TELEGRAM_WEBHOOK_SECRET:WEBHOOK_SECRET,ADMIN_SETUP_SECRET:WEBHOOK_SECRET};
- const req=secret=>new Request('https://api.example/internal/telegram/setup',{method:'POST',headers:{authorization:'Bearer '+secret},body:'{}'});
+ const req=secret=>new Request('https://api.example/internal/telegram/setup',{method:'POST',headers:{authorization:'Bearer '+secret},body:JSON.stringify({action:'setup'})});
  assert.equal((await worker.fetch(req('bad'),e)).status,403);
  const calls=telegramMock(method=>method==='getWebhookInfo'?Response.json({ok:true,result:{url:'https://other.example/webhook'}}):undefined);
  assert.equal((await worker.fetch(req(WEBHOOK_SECRET),e)).status,409);assert(!calls.some(c=>c.method==='setWebhook'));
@@ -334,7 +337,7 @@ test('ambiguous media delivery is not uploaded again',async()=>{
 test('pre-upgrade partial delivery resumes photos linked to existing text card',async()=>{
  const e=env(),id=crypto.randomUUID();telegramMock(()=>Response.json({ok:false,error_code:400},{status:400}));
  await worker.fetch(await request({id,files:[photo()]}),e);
- e.sqlite.prepare("UPDATE orders SET state='text_sent',message_id=100,message_kind='text'").run();
+ e.sqlite.prepare("UPDATE orders SET state='text_sent',message_id=100,message_kind='text',delivery_next_at=0").run();
  const calls=telegramMock();assert.equal((await worker.fetch(await request({id,files:[photo()]}),e)).status,200);
  assert.deepEqual(calls.map(c=>c.method),['sendPhoto']);assert.equal(JSON.parse(calls[0].form.get('reply_parameters')).message_id,100);
  assert.equal(e.sqlite.prepare('SELECT message_kind FROM orders').get().message_kind,'text');
@@ -428,4 +431,144 @@ test('lift landing is validated, ignores hidden choices and reaches manager with
  assert(!Object.hasOwn(validateOrder({...order(),sv:'furniture',location:'outside',liftFirstFloor:true}),'liftFirstFloor'));
  assert.throws(()=>validateOrder({...order(),liftFirstFloor:2}),{code:'ORDER'});
  assert(!Object.hasOwn(validateOrder(order()),'liftFirstFloor'));
+});
+
+async function maintenance(e){
+ const pending=[];await worker.scheduled({},e,{waitUntil:p=>pending.push(p)});await Promise.all(pending);
+}
+function setupRequest(body,secret=WEBHOOK_SECRET){return new Request('https://api.example/internal/telegram/setup',{method:'POST',headers:{authorization:'Bearer '+secret},body:JSON.stringify(body)})}
+
+test('security: upload authenticates before reading its body',async()=>{
+ const e=env(),calls=telegramMock();let reads=0;
+ const body=new ReadableStream({pull(c){reads++;c.enqueue(new Uint8Array([1]));c.close()}},{highWaterMark:0});
+ const req=new Request('https://api.example/api/orders',{method:'POST',headers:{origin:ORIGIN,'content-type':'multipart/form-data; boundary=x'},body,duplex:'half'});
+ assert.equal((await worker.fetch(req,e)).status,401);assert.equal(reads,0);assert.equal(calls.length,0);
+});
+test('security: upload rejects mismatched signed header and form',async()=>{
+ const e=env();telegramMock();const req=await request();req.headers.set('X-Telegram-Init-Data',await auth({user:JSON.stringify({id:99})}));
+ assert.equal((await worker.fetch(req,e)).status,401);assert.equal(e.sqlite.prepare('SELECT COUNT(*) n FROM orders').get().n,0);
+});
+test('security: repeated failed delivery has cooldown and five-attempt lifetime cap',async()=>{
+ const e=env(),id=crypto.randomUUID(),calls=telegramMock(()=>Response.json({ok:false,error_code:400},{status:400}));
+ assert.equal((await worker.fetch(await request({id,files:[photo()]}),e)).status,502);
+ const blocked=await worker.fetch(await request({id,files:[photo()]}),e);assert.equal(blocked.status,429);assert(Number(blocked.headers.get('retry-after'))>0);assert.equal(calls.length,1);
+ for(let i=1;i<5;i++){e.sqlite.exec('UPDATE orders SET delivery_next_at=0');assert.equal((await worker.fetch(await request({id,files:[photo()]}),e)).status,502)}
+ e.sqlite.exec('UPDATE orders SET delivery_next_at=0');const last=await worker.fetch(await request({id,files:[photo()]}),e);assert.equal(last.status,429);assert.equal((await last.json()).code,'ATTEMPTS');assert.equal(calls.length,5);
+});
+test('security: authenticated diagnostics requests are rate limited',async()=>{
+ const e=env(),signed=await auth();
+ for(let i=0;i<120;i++){
+  const response=await worker.fetch(new Request('https://api.example/api/contact',{method:'POST',headers:{origin:ORIGIN},body:JSON.stringify({initData:signed,diagnostic:{stage:'filled'}})}),e);assert.equal(response.status,200);
+ }
+ const response=await worker.fetch(new Request('https://api.example/api/contact',{method:'POST',headers:{origin:ORIGIN},body:JSON.stringify({initData:signed})}),e);assert.equal(response.status,429);
+ assert.equal(e.sqlite.prepare('SELECT COUNT(*) n FROM contact_diagnostics').get().n,1);
+});
+test('security: known delivery failure can be edited without changing request ID',async()=>{
+ const e=env(),id=crypto.randomUUID();telegramMock(()=>Response.json({ok:false,error_code:400},{status:400}));
+ assert.equal((await worker.fetch(await request({id}),e)).status,502);const before=e.sqlite.prepare('SELECT id FROM orders').get().id;
+ e.sqlite.exec('UPDATE orders SET delivery_next_at=0');const calls=telegramMock();
+ assert.equal((await worker.fetch(await request({id,data:{...order(),addr:'Минск, Ленина 2'}}),e)).status,200);
+ const row=e.sqlite.prepare('SELECT * FROM orders').get();assert.equal(row.id,before);assert.equal(row.delivery_attempts,2);assert.equal(JSON.parse(row.payload).addr,'Минск, Ленина 2');assert.match(calls[0].form.get('text'),/Ленина 2/);
+});
+test('security: simultaneous edits cannot deliver data different from stored payload',async()=>{
+ const e=env(),id=crypto.randomUUID();telegramMock(()=>Response.json({ok:false,error_code:400},{status:400}));await worker.fetch(await request({id}),e);e.sqlite.exec('UPDATE orders SET delivery_next_at=0');
+ const calls=telegramMock();const requests=await Promise.all(['Минск, Ленина 2','Минск, Ленина 3'].map(addr=>request({id,data:{...order(),addr}})));
+ const responses=await Promise.all(requests.map(r=>worker.fetch(r,e)));assert(responses.some(r=>r.status===200));assert.equal(calls.length,1);
+ const row=e.sqlite.prepare('SELECT * FROM orders').get();assert(calls[0].form.get('text').includes(JSON.parse(row.payload).addr));
+});
+test('security: old receipt cannot overwrite a newer Telegram contact',async()=>{
+ const e={...env(),TELEGRAM_WEBHOOK_SECRET:WEBHOOK_SECRET},id=crypto.randomUUID();telegramMock();await worker.fetch(await request({id}),e);
+ await worker.fetch(ownContactUpdate({phone:'375299999999'}),e);await worker.fetch(await request({id}),e);
+ const row=e.sqlite.prepare('SELECT * FROM customer_contacts').get();assert.equal(row.phone,'+375299999999');assert.equal(row.source,'telegram');
+});
+test('security: customer cancellation preserves deletion across devices',async()=>{
+ const e=env();managerMock();const {id}=await (await worker.fetch(await request(),e)).json();await worker.fetch(await organizeRequest(id,'delete'),e);
+ assert.equal((await worker.fetch(await organizeRequest(id,'cancel'),e)).status,200);assert.equal((await (await worker.fetch(await listRequest(),e)).json()).orders.length,0);
+ assert.equal(e.sqlite.prepare('SELECT customer_visibility FROM orders').get().customer_visibility,'deleted');
+});
+test('security: paused services are rejected for new submissions and addresses validate after cleanup',async()=>{
+ const e=env(),calls=telegramMock();
+ for(const sv of ['flat','office','load','rig'])assert.equal((await worker.fetch(await request({data:{...order(),sv,to:'Минск, Кирова 2'}}),e)).status,400);
+ assert.equal(calls.length,0);assert.throws(()=>validateOrder({...order(),addr:'\x01'.repeat(5)}),{code:'ORDER'});
+ assert.equal(validateOrder({...order(),addr:'Минск\nЛенина 1'}).addr,'Минск Ленина 1');
+});
+test('security: failed acceptance notice is durable and retried by scheduled maintenance',async()=>{
+ const {e,id}=await quoteFixture(),actionId=crypto.randomUUID();
+ telegramMock(method=>method==='sendMessage'?Response.json({ok:false,error_code:429,parameters:{retry_after:90}},{status:429}):undefined);
+ assert.equal((await worker.fetch(await decisionRequest(id,2,'accept',{actionId}),e)).status,200);
+ const task=e.sqlite.prepare("SELECT * FROM delivery_outbox WHERE id=?").get('client:42:'+actionId+':sendMessage');assert.equal(task.state,'pending');assert(task.available_at>Date.now()+80000);
+ const calls=telegramMock();await worker.fetch(await decisionRequest(id,2,'accept',{actionId}),e);assert.equal(calls.length,0);
+ e.sqlite.exec("UPDATE delivery_outbox SET available_at=0 WHERE state='pending'");await maintenance(e);
+ assert.equal(calls.filter(c=>c.method==='sendMessage').length,1);assert.equal(e.sqlite.prepare('SELECT state FROM delivery_outbox WHERE id=?').get(task.id).state,'sent');
+ await maintenance(e);assert.equal(calls.filter(c=>c.method==='sendMessage').length,1);
+});
+test('security: ambiguous notification is held for review, never automatically duplicated',async()=>{
+ const {e,id}=await quoteFixture();telegramMock(method=>{if(method==='sendMessage')throw Error('Lost response')});
+ await worker.fetch(await decisionRequest(id,2,'accept'),e);
+ assert.equal(e.sqlite.prepare("SELECT COUNT(*) n FROM delivery_outbox WHERE state='uncertain'").get().n,1);
+ const calls=telegramMock();await maintenance(e);assert.equal(calls.length,0);
+});
+test('security: simultaneous outbox consumers send each notification once',async()=>{
+ const {e,id}=await quoteFixture();telegramMock(method=>method==='sendMessage'?Response.json({ok:false,error_code:429},{status:429}):undefined);
+ await worker.fetch(await decisionRequest(id,2,'accept'),e);e.sqlite.exec("UPDATE delivery_outbox SET available_at=0 WHERE state='pending'");
+ const calls=telegramMock();await Promise.all([maintenance(e),maintenance(e)]);assert.equal(calls.filter(c=>c.method==='sendMessage').length,1);
+});
+test('security: expired send lease becomes uncertain while expired edit can be retried',async()=>{
+ const {e,id}=await quoteFixture();e.sqlite.exec("UPDATE delivery_outbox SET state='sending',lease_until=1,lease_token='crashed' WHERE id LIKE 'quote:%'");
+ const calls=telegramMock();await maintenance(e);
+ assert.equal(calls.filter(c=>c.method==='sendMessage').length,0);assert.equal(calls.filter(c=>c.method==='editMessageText').length,1);
+ assert.equal(e.sqlite.prepare("SELECT state FROM delivery_outbox WHERE kind='sendMessage'").get().state,'uncertain');
+});
+test('security: list pagination reaches old records and direct lookup checks owner',async()=>{
+ const e=env();telegramMock();await worker.fetch(await request(),e);
+ const first=e.sqlite.prepare('SELECT * FROM orders').get();
+ for(let i=1;i<=100;i++)e.sqlite.prepare("INSERT INTO orders(request_id,user_id,id,fingerprint,payload,photo_count,state,created_at,updated_at) VALUES(?,?,?,?,?,0,'sent',?,?)").run('request-for-page-'+i,'42','VG-'+i.toString(16).padStart(12,'0').toUpperCase(),first.fingerprint,first.payload,i,i);
+ const page=await (await worker.fetch(await listRequest(),e)).json();assert.equal(page.orders.length,100);assert(page.nextCursor);
+ const next=await (await worker.fetch(new Request('https://api.example/api/orders/list',{method:'POST',headers:{origin:ORIGIN},body:JSON.stringify({initData:await auth(),cursor:page.nextCursor})}),e)).json();assert.equal(next.orders.length,1);assert.equal(next.nextCursor,null);
+ assert.equal(new Set([...page.orders,...next.orders].map(o=>o.serverId)).size,101);
+ const lookup=init=>new Request('https://api.example/api/orders/get',{method:'POST',headers:{origin:ORIGIN},body:JSON.stringify({initData:init,id:'VG-000000000001'})});
+ assert.equal((await worker.fetch(lookup(await auth()),e)).status,200);assert.equal((await worker.fetch(lookup(await auth({user:JSON.stringify({id:99})})),e)).status,404);
+});
+test('security: uncertain orders remain visible and resolution requires protected audited confirmation',async()=>{
+ const e={...env(),TELEGRAM_WEBHOOK_SECRET:WEBHOOK_SECRET,ADMIN_SETUP_SECRET:WEBHOOK_SECRET};telegramMock(()=>{throw Error('Lost')});await worker.fetch(await request(),e);
+ const list=await (await worker.fetch(await listRequest(),e)).json();assert.equal(list.orders[0].businessStatus,'delivery_pending');
+ const row=e.sqlite.prepare('SELECT * FROM orders').get(),body={action:'resolve_order',id:row.id,confirmation:row.id,note:'Проверена карточка в группе',outcome:'delivered',expectedUpdatedAt:row.updated_at,messageId:700};
+ assert.equal((await worker.fetch(setupRequest(body,'bad'),e)).status,403);
+ telegramMock();assert.equal((await worker.fetch(setupRequest(body),e)).status,200);assert.equal((await worker.fetch(setupRequest(body),e)).status,409);
+ assert.equal(e.sqlite.prepare('SELECT state FROM orders').get().state,'sent');assert.equal(e.sqlite.prepare('SELECT COUNT(*) n FROM delivery_resolutions').get().n,1);
+});
+test('security: reviewed absence permits same-order retry and remains visible to its owner',async()=>{
+ const e={...env(),TELEGRAM_WEBHOOK_SECRET:WEBHOOK_SECRET,ADMIN_SETUP_SECRET:WEBHOOK_SECRET},requestId=crypto.randomUUID();telegramMock(()=>{throw Error('Lost')});await worker.fetch(await request({id:requestId}),e);
+ const row=e.sqlite.prepare('SELECT * FROM orders').get(),calls=telegramMock();
+ assert.equal((await worker.fetch(setupRequest({action:'resolve_order',id:row.id,confirmation:row.id,expectedUpdatedAt:row.updated_at,outcome:'not_delivered',note:'Проверено отсутствие сообщения'}),e)).status,200);assert.equal(calls.length,0);
+ const list=await (await worker.fetch(await listRequest(),e)).json();assert.equal(list.orders[0].businessStatus,'delivery_retry');
+ assert.equal((await worker.fetch(await request({id:requestId}),e)).status,200);assert.equal(calls.filter(c=>c.method==='sendMessage').length,1);
+});
+test('security: outbox insert failure rolls back the business decision',async()=>{
+ const {e,id}=await quoteFixture();e.sqlite.exec("CREATE TRIGGER reject_queue BEFORE INSERT ON delivery_outbox BEGIN SELECT RAISE(ABORT,'test storage failure'); END");
+ const calls=telegramMock();assert.equal((await worker.fetch(await decisionRequest(id,2,'accept'),e)).status,500);
+ assert.equal(e.sqlite.prepare('SELECT business_status FROM orders').get().business_status,'quoted');assert.equal(e.sqlite.prepare("SELECT COUNT(*) n FROM order_status_events WHERE status='accepted'").get().n,0);assert.equal(calls.length,0);
+});
+test('security: protected notification reconciliation cannot reset an active send',async()=>{
+ const {e,id}=await quoteFixture();e.ADMIN_SETUP_SECRET=WEBHOOK_SECRET;telegramMock(method=>{if(method==='sendMessage')throw Error('Lost')});await worker.fetch(await decisionRequest(id,2,'accept'),e);
+ const task=e.sqlite.prepare("SELECT * FROM delivery_outbox WHERE state='uncertain'").get();
+ const body={action:'resolve_notification',id:task.id,confirmation:task.id,outcome:'not_delivered',note:'Проверено отсутствие уведомления'};
+ e.sqlite.prepare("UPDATE delivery_outbox SET state='sending',lease_until=? WHERE id=?").run(Date.now()+120000,task.id);
+ assert.equal((await worker.fetch(setupRequest(body),e)).status,409);
+ e.sqlite.prepare("UPDATE delivery_outbox SET state='uncertain' WHERE id=?").run(task.id);assert.equal((await worker.fetch(setupRequest(body),e)).status,200);
+ const calls=telegramMock();await maintenance(e);assert.equal(calls.filter(c=>c.method==='sendMessage').length,1);
+});
+test('security: rate counters are atomic across consumers and reset in a new window',async()=>{
+ const {consumeLimit}=await import('../src/security.mjs');const e=env(),reject=error=>{throw error};
+ const results=await Promise.allSettled(Array.from({length:10},()=>consumeLimit(e,'test:atomic',2,60000,reject,120000)));
+ assert.equal(results.filter(r=>r.status==='fulfilled').length,2);assert.equal(results.filter(r=>r.status==='rejected'&&r.reason.code==='RATE').length,8);
+ await consumeLimit(e,'test:atomic',2,60000,reject,180000);assert.equal(e.sqlite.prepare('SELECT hits FROM request_limits WHERE key=?').get('test:atomic').hits,1);
+ await maintenance(e);assert.equal(e.sqlite.prepare('SELECT COUNT(*) n FROM request_limits WHERE key=?').get('test:atomic').n,0);
+});
+test('security: reconciliation of missing legacy photos preserves the already delivered text card',async()=>{
+ const e={...env(),TELEGRAM_WEBHOOK_SECRET:WEBHOOK_SECRET,ADMIN_SETUP_SECRET:WEBHOOK_SECRET},requestId=crypto.randomUUID();telegramMock(()=>Response.json({ok:false,error_code:400},{status:400}));await worker.fetch(await request({id:requestId,files:[photo()]}),e);
+ e.sqlite.exec("UPDATE orders SET state='uncertain',message_id=100,message_kind='text'");const row=e.sqlite.prepare('SELECT * FROM orders').get();
+ const calls=telegramMock();assert.equal((await worker.fetch(setupRequest({action:'resolve_order',id:row.id,confirmation:row.id,expectedUpdatedAt:row.updated_at,outcome:'not_delivered',note:'Текст есть, фото не доставлены'}),e)).status,200);
+ assert.equal(e.sqlite.prepare('SELECT state FROM orders').get().state,'text_sent');assert.equal(e.sqlite.prepare('SELECT message_id FROM orders').get().message_id,100);
+ assert.equal((await worker.fetch(await request({id:requestId,files:[photo()]}),e)).status,200);assert.deepEqual(calls.map(c=>c.method),['sendPhoto']);
 });
