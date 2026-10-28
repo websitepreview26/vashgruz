@@ -232,7 +232,7 @@ body{background:var(--bg)}.app-toolbar{display:flex;align-items:center;justify-c
 .address-group .conditions{padding:0;background:transparent;border:0;box-shadow:none}
 .address-group>.error:empty{display:none}
 .day-unsure{width:auto;min-width:116px;padding:10px 14px;display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:500;white-space:nowrap}
-.time-options{grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin-top:8px}.time-options .slot{flex-direction:column;gap:3px;justify-content:center;min-height:46px;padding:11px 5px;font-size:14px;font-weight:500;border-radius:12px}.time-options .slot:last-child{grid-column:1/-1}.custom-time{display:grid;grid-template-columns:1fr 1fr;gap:12px}.custom-time input{width:100%;min-width:0;padding:0 10px;background:transparent;border:0;font:inherit;color:var(--ink)}.time-options .slot[aria-pressed=true]{background:color-mix(in srgb,var(--acc) 12%,var(--card))}
+.time-options{grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin-top:8px}.time-options .slot{flex-direction:column;gap:3px;justify-content:center;min-height:46px;padding:11px 5px;font-size:14px;font-weight:500;border-radius:12px}.custom-time-control{margin-top:16px}.custom-time-control[data-active=true] .fld:has(#customTimeFrom){border-color:var(--acc)}.time-end{margin:10px 4px 0}.time-end summary{font-size:13px;color:var(--mut);cursor:pointer;padding:5px 0}.time-end .field-label{margin-top:10px}.custom-time-control input{width:100%;min-width:0;padding:0 10px;background:transparent;border:0;font:inherit;color:var(--ink)}.time-options .slot[aria-pressed=true]{background:color-mix(in srgb,var(--acc) 12%,var(--card))}
 .pickup-place{display:flex;gap:8px;margin:12px 0 4px}.pickup-place button,.lift-options button{border:1px solid var(--line);border-radius:10px;padding:10px;background:var(--bg);font-size:13px;color:var(--mut)}.pickup-place button{flex:1}.pickup-place button[aria-pressed=true],.lift-options button[aria-pressed=true]{border-color:var(--acc);background:color-mix(in srgb,var(--acc) 12%,var(--card));color:var(--ink)}
 .lift-options{display:flex;gap:4px}.lift-options button{padding:8px;font-size:12px}.condition-optional{display:block;font-size:10px;color:var(--mut);font-weight:400}
 .quote-question{display:block;margin-top:16px;padding:8px 0;font-size:14px;color:var(--mut);text-decoration:underline;text-underline-offset:3px}
@@ -434,7 +434,17 @@ function customTimeError(w){
  return {};
 }
 function timeOptions(w){
- return `<p class="conditions-title">Удобное время</p><div class="slots time-options" role="group" aria-label="Удобное время">${SLOTS.map((t,i)=>`<button class="slot" data-a="slot" data-v="${i}" aria-pressed="${i===w.slot}"><span>${t[0]}</span>${t[1]?`<small>${t[1]}</small>`:''}</button>`).join('')}</div>${w.slot===4?`<div class="custom-time">${[['customTimeFrom','С'],['customTimeTo','До · необязательно']].map(([key,label])=>`<div><label class="field-label" for="${key}">${label}</label><div class="fld ${S.errors[key]?'invalid':''}"><input type="time" id="${key}" data-f="${key}" value="${esc(w[key]||'')}" aria-describedby="err-${key}" aria-invalid="${!!S.errors[key]}"></div>${error(key)}</div>`).join('')}</div>`:''}<p class="hint">Точное время согласуем после оценки.</p>`;
+ const field=(key,label)=>`<label class="field-label" for="${key}">${label}</label><div class="fld ${S.errors[key]?'invalid':''}"><input type="time" id="${key}" data-f="${key}" value="${esc(w[key]||'')}" aria-describedby="err-${key}" aria-invalid="${!!S.errors[key]}"></div>${error(key)}`;
+ return `<p class="conditions-title">Удобное время</p><div class="slots time-options" role="group" aria-label="Удобное время">${SLOTS.slice(0,4).map((t,i)=>`<button class="slot" data-a="slot" data-v="${i}" aria-pressed="${i===w.slot}"><span>${t[0]}</span>${t[1]?`<small>${t[1]}</small>`:''}</button>`).join('')}</div><div class="custom-time-control" data-active="${w.slot===4}">${field('customTimeFrom','Или точное время')}<details class="time-end" ${w.customTimeTo||S.errors.customTimeTo?'open':''}><summary>Добавить время окончания</summary>${field('customTimeTo','До')}</details></div><p class="hint">Точное время согласуем после оценки.</p>`;
+}
+function updateCustomTime(field){
+ const w=S.w,key=field.dataset.f;if(!w||!['customTimeFrom','customTimeTo'].includes(key))return;
+ w[key]=field.value;
+ if(key==='customTimeFrom'&&!field.value){w.customTimeTo='';const end=$('#customTimeTo');if(end)end.value=''}
+ w.slot=w.customTimeFrom||w.customTimeTo?4:0;
+ for(const name of ['customTimeFrom','customTimeTo']){delete S.errors[name];const error=$('#err-'+name);if(error)error.textContent='';const input=$('#'+name);input?.setAttribute('aria-invalid','false');input?.closest?.('.fld')?.classList.remove('invalid')}
+ document.querySelectorAll('.time-options [data-a="slot"]').forEach(button=>button.setAttribute('aria-pressed',String(Number(button.dataset.v)===w.slot)));
+ const control=$('.custom-time-control');if(control)control.setAttribute('data-active',String(w.slot===4));
 }
 function wizard(){
  const w=S.w,s=sv(w.sv),seg=[0,1,2].map(i=>`<i class="${i<=S.step?'on':''}"></i>`).join('');
@@ -1000,7 +1010,7 @@ $('#photo-input').addEventListener('change',e=>{
 });
 document.addEventListener('click',e=>{if(e.target.closest('.photo-add')&&(S.preparing||S.sending))e.preventDefault()},true);
 document.addEventListener('keydown',e=>{if((e.key==='Enter'||e.key===' ')&&e.target.matches('.photo-add')&&!S.preparing&&!S.sending){e.preventDefault();$('#photo-input').click()}});
-document.addEventListener('input',e=>{if(e.target.tagName==='TEXTAREA')fitTextarea(e.target);if(e.target.hasAttribute('data-quote-note')){S.discussionText=e.target.value;return}const f=e.target.dataset.f;if(f&&S.w){S.w[f]=e.target.value;storeDraft();if(S.errors[f]){delete S.errors[f];$('#err-'+f).textContent='';e.target.setAttribute('aria-invalid','false');e.target.closest('.fld')?.classList.remove('invalid')}refresh()}});
+document.addEventListener('input',e=>{if(e.target.tagName==='TEXTAREA')fitTextarea(e.target);if(e.target.hasAttribute('data-quote-note')){S.discussionText=e.target.value;return}const f=e.target.dataset.f;if(f&&S.w){if(['customTimeFrom','customTimeTo'].includes(f))updateCustomTime(e.target);else S.w[f]=e.target.value;storeDraft();if(S.errors[f]){delete S.errors[f];$('#err-'+f).textContent='';e.target.setAttribute('aria-invalid','false');e.target.closest('.fld')?.classList.remove('invalid')}refresh()}});
 document.addEventListener('keydown',e=>{if(!S.sheet)return;if(e.key==='Escape')return close();if(e.key==='Tab'){const items=[...document.querySelectorAll('#sheet button:not(:disabled), #sheet a')];const first=items[0],last=items[items.length-1];if(e.shiftKey&&document.activeElement===first){e.preventDefault();last.focus()}else if(!e.shiftKey&&document.activeElement===last){e.preventDefault();first.focus()}}});
 document.addEventListener('visibilitychange',()=>{if(!document.hidden)lastStatusFetch=0;scheduleStatuses()});
 if(inTg)tg.onEvent('activated',()=>{lastStatusFetch=0;scheduleStatuses()});
