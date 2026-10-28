@@ -56,8 +56,8 @@ export function createBotChatService({telegram,stmt}){
   // Deletes are idempotent. An expired deletion lease is safe to retry.
   await stmt(env,"UPDATE private_message_cleanup SET state='pending',lease_token='' WHERE state='deleting' AND lease_until<?",now).run();
   const jobs=(await stmt(env,`SELECT c.* FROM private_message_cleanup c JOIN bot_private_chats b ON b.user_id=c.user_id
-   WHERE c.state='pending' AND c.available_at<=? AND c.created_at>? AND b.pinned=1 AND b.welcome_state='ready'
-   AND (? IS NULL OR c.user_id=?) AND c.message_id!=b.welcome_message_id ORDER BY c.created_at,c.message_id LIMIT 10`,now,now-48*3600000,userId,userId).all()).results;
+   WHERE c.state='pending' AND c.available_at<=? AND c.created_at>? AND b.pinned=1 AND b.welcome_state='ready' AND b.welcome_revision=?
+   AND (? IS NULL OR c.user_id=?) AND c.message_id!=b.welcome_message_id ORDER BY c.created_at,c.message_id LIMIT 10`,now,now-48*3600000,PROFILE_REVISION*2+1,userId,userId).all()).results;
   for(const job of jobs){
    const token=crypto.randomUUID();
    const claim=await stmt(env,"UPDATE private_message_cleanup SET state='deleting',lease_token=?,lease_until=?,attempts=attempts+1 WHERE user_id=? AND message_id=? AND state='pending' AND available_at<=?",token,Date.now()+120000,job.user_id,job.message_id,Date.now()).run();
@@ -101,7 +101,7 @@ export function createBotChatService({telegram,stmt}){
  async function maintenance(env){
   const chats=(await stmt(env,`SELECT b.user_id FROM bot_private_chats b WHERE b.lease_until<=? AND b.welcome_state IN ('new','ready','sending')
    AND EXISTS(SELECT 1 FROM private_message_cleanup c WHERE c.user_id=b.user_id AND c.state='pending')
-   AND (b.pinned=0 OR b.welcome_state!='ready') ORDER BY b.updated_at LIMIT 5`,Date.now()).all()).results;
+   AND (b.pinned=0 OR b.welcome_state!='ready' OR b.welcome_revision!=?) ORDER BY b.updated_at LIMIT 5`,Date.now(),PROFILE_REVISION*2+Number(env.CLEAN_PRIVATE_MESSAGES==='true')).all()).results;
   for(const chat of chats)await ensureWelcome(env,chat.user_id);
   await flushCleanup(env);
   await stmt(env,'DELETE FROM private_message_cleanup WHERE created_at<?',Date.now()-48*3600000).run();

@@ -682,3 +682,9 @@ test('bot chat: a database error after confirmed welcome delivery preserves its 
  assert.equal(e.sqlite.prepare('SELECT welcome_message_id FROM bot_private_chats').get().welcome_message_id,100);
  const calls=telegramMock();await maintenance(e);assert.equal(calls.filter(c=>c.method==='sendMessage').length,0);assert(calls.some(c=>c.method==='pinChatMessage'));assert(calls.some(c=>c.method==='deleteMessage'));
 });
+test('bot chat: enabling cleanup does not erase input until the welcome includes its cleanup notice',async()=>{
+ const e=privateEnv();e.CLEAN_PRIVATE_MESSAGES='false';telegramMock();await worker.fetch(privateMessage(),e);
+ e.CLEAN_PRIVATE_MESSAGES='true';const calls=telegramMock(method=>method==='editMessageText'?Response.json({ok:false,error_code:400,description:'Bad Request: cannot edit message'},{status:400}):undefined);
+ await worker.fetch(privateMessage('keep until the warning is visible',{id:201}),e);await maintenance(e);
+ assert.equal(calls.some(c=>c.method==='deleteMessage'),false);assert.equal(e.sqlite.prepare('SELECT state FROM private_message_cleanup').get().state,'pending');
+});
