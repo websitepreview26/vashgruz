@@ -32,10 +32,10 @@ export function createBotChatService({telegram,stmt}){
     try{
      const common={chat_id:userId,message_id:messageId,reply_markup:welcomeKeyboard()};
      if(photo){
-      if(row.welcome_kind==='photo'&&row.welcome_media_url===photo)await telegram(env,'editMessageCaption',form({...common,caption:welcomeText(cleanup),parse_mode:'HTML'}));
-      else await telegram(env,'editMessageMedia',form({...common,media:{type:'photo',media:photo,caption:welcomeText(cleanup),parse_mode:'HTML'}}));
-     }else if(row.welcome_kind==='photo')await telegram(env,'editMessageCaption',form({...common,caption:welcomeText(cleanup),parse_mode:'HTML'}));
-     else await telegram(env,'editMessageText',form({...common,text:welcomeText(cleanup),parse_mode:'HTML'}));
+      if(row.welcome_kind==='photo'&&row.welcome_media_url===photo)await telegram(env,'editMessageCaption',form({...common,caption:welcomeText(),parse_mode:'HTML'}));
+      else await telegram(env,'editMessageMedia',form({...common,media:{type:'photo',media:photo,caption:welcomeText(),parse_mode:'HTML'}}));
+     }else if(row.welcome_kind==='photo')await telegram(env,'editMessageCaption',form({...common,caption:welcomeText(),parse_mode:'HTML'}));
+     else await telegram(env,'editMessageText',form({...common,text:welcomeText(),parse_mode:'HTML'}));
     }catch(e){
      if(e.code==='DELIVERY'&&e.messageMissing){
       messageId=null;
@@ -49,7 +49,7 @@ export function createBotChatService({telegram,stmt}){
    if(!messageId){
     // Persist the send state before calling Telegram so a crash cannot cause an automatic duplicate.
     await stmt(env,"UPDATE bot_private_chats SET welcome_state='sending',welcome_message_id=NULL,pinned=0 WHERE user_id=? AND lease_token=?",userId,token).run();
-    const sent=await telegram(env,photo?'sendPhoto':'sendMessage',form({chat_id:userId,...(photo?{photo,caption:welcomeText(cleanup)}:{text:welcomeText(cleanup)}),parse_mode:'HTML',disable_notification:true}));
+    const sent=await telegram(env,photo?'sendPhoto':'sendMessage',form({chat_id:userId,...(photo?{photo,caption:welcomeText()}:{text:welcomeText()}),parse_mode:'HTML',disable_notification:true}));
     if(!Number.isSafeInteger(sent?.message_id)||sent.message_id<=0)throw Error('Unconfirmed welcome message');
     messageId=sent.message_id;
     await stmt(env,"UPDATE bot_private_chats SET welcome_state='ready',welcome_message_id=?,welcome_revision=?,pinned=0 WHERE user_id=? AND lease_token=?",messageId,revision,userId,token).run();

@@ -583,7 +583,7 @@ const privateEnv=()=>({...env(),TELEGRAM_WEBHOOK_SECRET:WEBHOOK_SECRET,CLEAN_PRI
 test('bot chat: start creates one pinned welcome before deleting the incoming command',async()=>{
  const e=privateEnv(),calls=telegramMock();assert.equal((await worker.fetch(privateMessage(),e)).status,200);
  assert.deepEqual(calls.map(c=>c.method),['sendMessage','pinChatMessage','deleteMessage']);
- const welcome=calls[0].form;assert.match(welcome.get('text'),/ВАШ ГРУЗ/);assert.match(welcome.get('text'),/очищаются автоматически/);assert.equal(welcome.get('chat_id'),'42');assert.equal(welcome.get('parse_mode'),'HTML');
+ const welcome=calls[0].form;assert.match(welcome.get('text'),/ВАШ ГРУЗ/);assert.doesNotMatch(welcome.get('text'),/очищаются автоматически/);assert.equal(welcome.get('chat_id'),'42');assert.equal(welcome.get('parse_mode'),'HTML');
  assert.equal(welcome.get('reply_markup'),null);
  assert.equal(calls[1].form.get('message_id'),'100');assert.equal(calls[2].form.get('message_id'),'200');
  assert.equal(e.sqlite.prepare('SELECT pinned FROM bot_private_chats').get().pinned,1);
@@ -683,10 +683,10 @@ test('bot chat: a database error after confirmed welcome delivery preserves its 
  assert.equal(e.sqlite.prepare('SELECT welcome_message_id FROM bot_private_chats').get().welcome_message_id,100);
  const calls=telegramMock();await maintenance(e);assert.equal(calls.filter(c=>c.method==='sendMessage').length,0);assert(calls.some(c=>c.method==='pinChatMessage'));assert(calls.some(c=>c.method==='deleteMessage'));
 });
-test('bot chat: enabling cleanup does not erase input until the welcome includes its cleanup notice',async()=>{
+test('bot chat: enabling cleanup waits for the current welcome revision before deleting input',async()=>{
  const e=privateEnv();e.CLEAN_PRIVATE_MESSAGES='false';telegramMock();await worker.fetch(privateMessage(),e);
  e.CLEAN_PRIVATE_MESSAGES='true';const calls=telegramMock(method=>method==='editMessageText'?Response.json({ok:false,error_code:400,description:'Bad Request: cannot edit message'},{status:400}):undefined);
- await worker.fetch(privateMessage('keep until the warning is visible',{id:201}),e);await maintenance(e);
+ await worker.fetch(privateMessage('keep until the current welcome is visible',{id:201}),e);await maintenance(e);
  assert.equal(calls.some(c=>c.method==='deleteMessage'),false);assert.equal(e.sqlite.prepare('SELECT state FROM private_message_cleanup').get().state,'pending');
 });
 
