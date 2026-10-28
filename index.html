@@ -457,7 +457,7 @@ function wizard(){
  <section class="address-group" aria-label="${s.mv?'Точка А':'Место работы'}">${addressField('addr',s.mv?'Точка А — откуда забрать':'Адрес','Улица, дом, город')}${conditions('',s.mv?'В точке А':'Условия на месте',false)}</section>
  ${s.mv?`<section class="address-group" aria-label="Точка Б">${addressField('to','Точка Б — куда привезти','Улица, дом, город')}${conditions('to','В точке Б',false)}</section>`:''}
  <div class="sec"><b>Когда удобно?</b><small>Можно уточнить позже</small></div>${error('date')}
- <div class="days"><button class="day day-unsure" data-a="day" data-v="" aria-pressed="${!w.date}">Пока не знаю</button>${Array.from({length:5},(_,i)=>plus(i)).map((d,i)=>`<button class="day" data-a="day" data-v="${iso(d)}" aria-pressed="${iso(d)===w.date}"><small>${i===0?'Сегодня':i===1?'Завтра':d.toLocaleDateString('ru-RU',{weekday:'short'})}</small><b>${d.getDate()}</b></button>`).join('')}</div>
+ <div class="days">${Array.from({length:5},(_,i)=>plus(i)).map((d,i)=>`<button class="day" data-a="day" data-v="${iso(d)}" aria-pressed="${iso(d)===w.date}"><small>${i===0?'Сегодня':i===1?'Завтра':d.toLocaleDateString('ru-RU',{weekday:'short'})}</small><b>${d.getDate()}</b></button>`).join('')}<button class="day day-unsure" data-a="day" data-v="" aria-pressed="${!w.date}">Пока не знаю</button></div>
  <button class="fld" data-a="sheet" data-v="cal">${ic('cal')}<span class="v">${w.date?esc(fd(w.date)):'Выбрать другую дату'}</span>${ic('chev')}</button>
  ${w.date?timeOptions(w):''}`;
  return bar+`<div class="hd"><h1>Куда сообщить стоимость?</h1><p class="sub">Предложение появится здесь, в приложении.</p></div>
