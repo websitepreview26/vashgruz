@@ -1,0 +1,28 @@
+{
+  "name": "vashgruz-production-api",
+  "account_id": "329067336d53aef4d14658005b3aae45",
+  "main": "src/worker.mjs",
+  "compatibility_date": "2026-10-25",
+  "workers_dev": true,
+  "vars": {
+    "MINI_APP_URL": "https://websitepreview26.github.io/vashgruz/",
+    "BOT_USERNAME": "vash_gruz_by_bot",
+    "ALLOWED_ORIGIN": "https://websitepreview26.github.io"
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "vashgruz-production-orders",
+      "database_id": "a2692268-0f3f-49b9-9e76-49d8ce6c44cb",
+      "migrations_dir": "migrations"
+    }
+  ],
+  "triggers": {
+    "crons": [
+      "* * * * *"
+    ]
+  },
+  "observability": {
+    "enabled": false
+  }
+}

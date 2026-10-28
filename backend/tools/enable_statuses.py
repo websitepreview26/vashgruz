@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Configure Telegram callbacks using the bot token already stored in the Worker."""
+import argparse
 import json
 import os
 import secrets
@@ -8,18 +9,23 @@ import sys
 import time
 
 sys.dont_write_bytecode = True
-from connect_telegram import ACCOUNT_ID, ROOT, WORKER_URL, runtime
+from connect_telegram import ROOT, runtime, connection
 
 
-def main():
-    cli = runtime()
-    env = {**os.environ, "WRANGLER_SEND_METRICS": "false", "WRANGLER_LOG_PATH": os.devnull, "CLOUDFLARE_ACCOUNT_ID": ACCOUNT_ID}
+def main(argv=None):
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--config")
+    parser.add_argument("--review", action="store_true")
+    args = parser.parse_args(argv)
+    target = connection(args.config)
+    cli = runtime() + ["--config", str(target["path"])]
+    env = {**os.environ, "WRANGLER_SEND_METRICS": "false", "WRANGLER_LOG_PATH": os.devnull, "CLOUDFLARE_ACCOUNT_ID": target["account"]}
     for key in ("CLOUDFLARE_API_TOKEN", "CLOUDFLARE_API_KEY", "CLOUDFLARE_EMAIL"):
         env.pop(key, None)
     who = subprocess.run(cli + ["whoami", "--json"], cwd=ROOT, env=env, capture_output=True, text=True)
     try:
         account = json.loads(who.stdout)
-        if who.returncode or not any(a["id"] == ACCOUNT_ID for a in account.get("accounts", [])):
+        if who.returncode or not any(a["id"] == target["account"] for a in account.get("accounts", [])):
             raise ValueError()
     except (ValueError, KeyError):
         raise SystemExit("Неверный профиль Cloudflare. Настройка остановлена.")
@@ -37,7 +43,7 @@ fetch(d.url,{method:'POST',headers:{authorization:'Bearer '+d.key,'content-type'
 """
 
     def call(body):
-        payload = json.dumps({"url": WORKER_URL + "/internal/telegram/setup", "key": admin_key, "body": body})
+        payload = json.dumps({"url": target["url"] + "/internal/telegram/setup", "key": admin_key, "body": body})
         for attempt in range(7):
             r = subprocess.run([cli[0], "-e", source], input=payload, capture_output=True, text=True, timeout=95)
             try:
@@ -57,7 +63,7 @@ fetch(d.url,{method:'POST',headers:{authorization:'Bearer '+d.key,'content-type'
     if not setup.get("webhook"):
         raise SystemExit("Telegram не подтвердил webhook.")
     print("Webhook подключён и подтверждён Telegram.")
-    if "--review" in sys.argv:
+    if args.review:
         from review_deliveries import review
         review(call)
         return

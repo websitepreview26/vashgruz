@@ -6,7 +6,9 @@
   "scripts": {
     "test": "node --test test/*.test.mjs",
     "deploy": "wrangler deploy",
-    "migrate": "wrangler d1 migrations apply vashgruz-orders --remote"
+    "migrate": "wrangler d1 migrations apply vashgruz-orders --remote",
+    "deploy:production": "wrangler deploy --config wrangler.production.jsonc",
+    "migrate:production": "wrangler d1 migrations apply vashgruz-production-orders --remote --config wrangler.production.jsonc"
   },
   "devDependencies": { "wrangler": "4.149.0" }
 }

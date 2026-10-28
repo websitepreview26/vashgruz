@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, minimum-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
 <title>Ваш Груз</title>
 <script src="https://telegram.org/js/telegram-web-app.js"></script>
-<script src="api-config.js?v=live-1"></script>
+<script src="api-config.js?v=production-1"></script>
 <style>
 :root{--bg:#f3f4f6;--card:#fff;--ink:#0f1b2a;--mut:#6c7a89;--line:rgba(15,27,42,.09);--acc:#ffbf16;--accx:#1a1400;--navy:#0f1b2a;--sh:0 1px 2px rgba(15,27,42,.05),0 10px 28px rgba(15,27,42,.07)}
 [data-t=dark]{--bg:#0a1119;--card:#131d28;--ink:#eef3f8;--mut:#8796a7;--line:rgba(255,255,255,.08);--sh:0 10px 28px rgba(0,0,0,.4)}
@@ -326,6 +326,7 @@ const user = tg && tg.initDataUnsafe && tg.initDataUnsafe.user;
 const API_BASE=String(window.VG_CONFIG?.apiBase||'').replace(/\/$/,'');
 const ORDER_OWNER=String(user?.id||'local');
 const ORDER_STORAGE_KEY='vg-requests-v3:'+ORDER_OWNER+':'+API_BASE;
+const PHONE_STORAGE_KEY='vg-phone-v2:'+ORDER_OWNER+':'+API_BASE;
 const ownsOrder=o=>o.ownerId===ORDER_OWNER;
 const photoCache=new Map();
 let S = {tab:'home', w:null, step:0, last:null, sheet:null, cal:null, anim:'', orders:[], errors:{},sending:false,preparing:false,contactBusy:false,phoneManual:false,contactError:'',listTab:'active',listLimit:8,orderMenuId:null,orderConfirmAction:null,organizing:false,organizeError:'',discussing:false,discussionText:'',discussionVersion:null,decisionError:'',photoError:'',submitError:''};
@@ -595,8 +596,8 @@ function close(){
  sheetFocus=null;
 }
 function validate(){const w=S.w,e={};if(S.step===1){if(w.addr.trim().length<5)e.addr='Укажите улицу, дом и населённый пункт.';if(sv(w.sv).mv&&w.to.trim().length<5)e.to='Укажите адрес выгрузки.';if(w.date&&w.date<today())e.date='Выберите сегодняшнюю или будущую дату.'}if(S.step===2){const digits=w.phone.replace(/\D/g,'');if(!/^(?:375\d{9}|80\d{9})$/.test(digits))e.phone='Введите номер: +375 и 9 цифр, либо 8 0 и 9 цифр.'}return e}
-function cachedPhone(){try{return localStorage.getItem('vg-phone:'+String(user?.id||'local'))||''}catch{return ''}}
-function cachePhone(phone){try{if(validPhone(phone))localStorage.setItem('vg-phone:'+String(user?.id||'local'),phone)}catch{}}
+function cachedPhone(){try{return localStorage.getItem(PHONE_STORAGE_KEY)||''}catch{return ''}}
+function cachePhone(phone){try{if(validPhone(phone))localStorage.setItem(PHONE_STORAGE_KEY,phone)}catch{}}
 function validPhone(phone){return /^\+?[1-9]\d{8,14}$/.test(String(phone||'').replace(/[\s()-]/g,''))}
 function canSharePhone(){return !!(API_BASE&&inTg&&typeof tg.requestContact==='function'&&(!tg.isVersionAtLeast||tg.isVersionAtLeast('6.9')))}
 function contactControl(w){

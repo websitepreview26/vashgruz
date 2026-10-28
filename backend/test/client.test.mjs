@@ -277,3 +277,9 @@ test('security: pagination loads older remote orders and deep link looks up owne
  c.run('statusPageCount=2');await c.run('syncOrders()');assert.equal(c.run('S.orders.length'),101);assert.equal(c.run('statusNextCursor'),null);assert.equal(calls[1].body.cursor,'next-page');
  c.run("statusPageCount=1;pendingOrderId='VG-000000000500'");await c.run('syncOrders()');assert.equal(c.run('S.last.serverId'),'VG-000000000500');assert.equal(c.run('S.tab'),'done');assert(calls.some(c=>c.url.endsWith('/get')));
 });
+
+test('production: phone cache is scoped to authenticated user and API without importing legacy test number',()=>{
+ const c=client({live:true});c.storage.set('vg-phone:42','+375291234567');
+ assert.equal(c.run('cachedPhone()'),'');assert.equal(c.run('PHONE_STORAGE_KEY'),'vg-phone-v2:42:https://api.example');
+ c.run("cachePhone('+375299999999')");assert.equal(c.run('cachedPhone()'),'+375299999999');assert.equal(c.storage.get('vg-phone-v2:42:https://api.example'),'+375299999999');
+});
