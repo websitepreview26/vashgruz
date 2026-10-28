@@ -178,6 +178,13 @@ body{background:var(--bg)}.app-toolbar{display:flex;align-items:center;justify-c
 .photo-item img{width:100%;height:100%;object-fit:cover;display:block}
 .photo-item button{position:absolute;right:5px;top:5px;border-radius:50%;background:#0f1b2acc;color:#fff;width:27px;height:27px;display:grid;place-items:center}
 .photo-item button svg{width:15px;height:15px}.photo-add{border:1px dashed var(--mut);display:flex;align-items:center;justify-content:center;flex-direction:column;gap:8px;color:var(--mut);font-size:12px}
+.photo-progress{padding:14px;margin:12px 0;border:1px solid color-mix(in srgb,var(--acc) 35%,var(--line));border-radius:16px;background:var(--card)}
+.photo-progress[hidden]{display:none}.photo-progress-head{display:flex;align-items:center;gap:10px}.photo-progress-copy{flex:1;min-width:0}.photo-progress-copy b{display:block;font-size:14px}.photo-progress-copy small{display:block;color:var(--mut);font-size:12px;margin-top:3px}.photo-progress-cancel{font-size:13px;padding:8px 0 8px 8px;color:var(--mut);text-decoration:underline;text-underline-offset:3px}
+.photo-spinner{width:22px;height:22px;border:2px solid var(--line);border-top-color:var(--acc);border-radius:50%;flex:none;animation:photo-spin .8s linear infinite}
+.photo-progress progress{display:block;width:100%;height:5px;margin:13px 0 8px;border:0;border-radius:8px;overflow:hidden;appearance:none;background:var(--line);accent-color:var(--acc)}.photo-progress progress::-webkit-progress-bar{background:var(--line)}.photo-progress progress::-webkit-progress-value{background:var(--acc);border-radius:8px;transition:width .2s}.photo-progress progress::-moz-progress-bar{background:var(--acc)}.photo-progress-note{font-size:11px;color:var(--mut)}
+.photo-pending{display:flex;align-items:center;justify-content:center;flex-direction:column;gap:9px;border:1px dashed var(--line);color:var(--mut);font-size:11px}.photo-pending .photo-spinner{width:18px;height:18px}.photo-item button:disabled{opacity:.4}
+@keyframes photo-spin{to{transform:rotate(360deg)}}
+@media(prefers-reduced-motion:reduce){.photo-spinner{animation:none}.photo-progress progress::-webkit-progress-value{transition:none}}
 #go:disabled{opacity:.6}
 
 .order-status-panel{padding:20px 16px;background:var(--card);border:1px solid var(--line);border-radius:18px;margin-bottom:16px}
@@ -329,7 +336,7 @@ const ORDER_STORAGE_KEY='vg-requests-v3:'+ORDER_OWNER+':'+API_BASE;
 const PHONE_STORAGE_KEY='vg-phone-v2:'+ORDER_OWNER+':'+API_BASE;
 const ownsOrder=o=>o.ownerId===ORDER_OWNER;
 const photoCache=new Map();
-let S = {tab:'home', w:null, step:0, last:null, sheet:null, cal:null, anim:'', orders:[], errors:{},sending:false,preparing:false,contactBusy:false,phoneManual:false,contactError:'',listTab:'active',listLimit:8,orderMenuId:null,orderConfirmAction:null,organizing:false,organizeError:'',discussing:false,discussionText:'',discussionVersion:null,decisionError:'',photoError:'',submitError:''};
+let S = {tab:'home', w:null, step:0, last:null, sheet:null, cal:null, anim:'', orders:[], errors:{},sending:false,preparing:false,photoProgress:null,contactBusy:false,phoneManual:false,contactError:'',listTab:'active',listLimit:8,orderMenuId:null,orderConfirmAction:null,organizing:false,organizeError:'',discussing:false,discussionText:'',discussionVersion:null,decisionError:'',photoError:'',submitError:''};
 try {
  const current=localStorage.getItem(ORDER_STORAGE_KEY);
  const legacy=current?null:localStorage.getItem('vg-requests-v2');
@@ -356,7 +363,7 @@ normalizeDrafts();save();
 const TABS = [['home','Заказ','truck'],['orders','Заявки','list']];
 $('#tabs').innerHTML = TABS.map(t => `<button data-a="tab" data-v="${t[0]}">${ic(t[2])}${t[1]}</button>`).join('');
 if (inTg) tg.BackButton.onClick(back);
-function back(animated=true){if(S.sending||S.preparing||S.organizing)return;hap();if(S.discussing){S.discussing=false;return render(true)}if(S.sheet)return close();S.errors={};S.anim=animated===false?'':'ab';if(S.w&&S.step>0){storeDraft();S.step--;}else{if(S.w)storeDraft();const wasDone=S.tab==='done';S.w=null;S.tab=wasDone?'orders':'home'}render()}
+function back(animated=true){if(S.sending||S.organizing)return;if(S.preparing)cancelPhotoPreparation(false);hap();if(S.discussing){S.discussing=false;return render(true)}if(S.sheet)return close();S.errors={};S.anim=animated===false?'':'ab';if(S.w&&S.step>0){storeDraft();S.step--;}else{if(S.w)storeDraft();const wasDone=S.tab==='done';S.w=null;S.tab=wasDone?'orders':'home'}render()}
 function home(){
  const draft=S.orders.find(o=>o.status==='draft');
  return `<section class="home-original"><div class="hrow"><h1>Что нужно вывезти<br>или перевезти?</h1></div>
@@ -381,13 +388,46 @@ function conditions(prefix,title,showTitle=true){
  return `${showTitle?`<p class="conditions-title">${title}</p>`:''}${where}<div class="card conditions"><div class="rw"><span>Этаж <small class="condition-optional">необязательно</small></span><div class="stp"><button data-a="fl" data-k="${f}" data-v="-1" aria-label="Уменьшить этаж" ${!Number.isInteger(w[f])?'disabled':''}>−</button><b>${Number.isInteger(w[f])?w[f]:'—'}</b><button data-a="fl" data-k="${f}" data-v="1" aria-label="Увеличить этаж" ${w[f]>=50?'disabled':''}>+</button></div></div><div class="rw"><span>Лифт</span><div class="lift-options" role="group" aria-label="Лифт: ${title}">${[[true,'Есть'],[false,'Нет']].map(([value,label])=>`<button data-a="lift-choice" data-k="${l}" data-v="${value}" aria-pressed="${value===w[l]||value===null&&w[l]===undefined}">${label}</button>`).join('')}</div></div>${liftDetails(prefix)}</div>`;
 }
 
+let photoJob=null;
+function photoCountText(){const n=S.w?.photos?.length||0;return n?'Добавлено: '+n+' из 5':'необязательно · до 5'}
+function photoProgressPanel(){
+ const p=S.photoProgress;
+ return `<section id="photo-progress" class="photo-progress" ${S.preparing?'':'hidden'} aria-label="Подготовка фотографий"><div class="photo-progress-head"><i class="photo-spinner" aria-hidden="true"></i><div class="photo-progress-copy" aria-live="polite"><b id="photo-progress-title">${p?'Фото '+Math.min(p.done+1,p.total)+' из '+p.total:'Подготавливаем фото'}</b><small id="photo-progress-stage">${esc(p?.stage||'Открываем фото')}</small></div><button class="photo-progress-cancel" data-a="cancel-photos">Отменить</button></div><progress id="photo-progress-bar" value="${p?.done||0}" max="${p?.total||1}" aria-label="Обработано фотографий"></progress><p class="photo-progress-note">Большие фото могут обрабатываться чуть дольше.</p></section>`;
+}
+function photoTiles(){
+ const photos=S.w?.photos||[],p=S.photoProgress;
+ const ready=photos.map((photo,i)=>`<div class="photo-item"><img src="${photo.url}" alt="Фото ${i+1}"><button data-a="remove-photo" data-v="${i}" aria-label="Удалить фото ${i+1}" ${S.preparing?'disabled':''}>${ic('x')}</button></div>`).join('');
+ const pending=S.preparing&&p?Array.from({length:Math.max(0,p.total-p.done)},(_,i)=>`<div class="photo-item photo-pending" aria-hidden="true"><i class="photo-spinner"></i><span>Фото ${p.done+i+1} из ${p.total}</span></div>`).join(''):'';
+ return ready+pending+(!S.preparing&&photos.length<5?`<label class="photo-add" for="photo-input" role="button" tabindex="0" aria-disabled="false">${ic('cam')}<span>Добавить</span></label>`:'');
+}
+function updatePhotoPreparationUi(grid=false){
+ const p=S.photoProgress,panel=$('#photo-progress');if(panel)panel.hidden=!S.preparing;
+ if(p){
+  const title=$('#photo-progress-title'),stage=$('#photo-progress-stage'),bar=$('#photo-progress-bar');
+  if(title)title.textContent='Фото '+Math.min(p.done+1,p.total)+' из '+p.total;
+  if(stage)stage.textContent=p.stage;
+  if(bar){bar.max=p.total;bar.value=p.done;bar.setAttribute('aria-valuetext',p.done+' из '+p.total)}
+ }
+ if(grid){const target=$('#photo-grid');if(target){target.innerHTML=photoTiles();target.setAttribute('aria-busy',String(S.preparing))}const count=$('#photo-count');if(count)count.textContent=photoCountText();const error=$('#photo-error');if(error)error.textContent=S.photoError}
+ refresh();
+}
+function cancelPhotoPreparation(redraw=true){
+ const job=photoJob;if(!job)return;
+ photoJob=null;job.controller.abort();S.preparing=false;S.photoProgress=null;
+ if(S.w===job.w){storeDraft();if(redraw)render(true)}
+}
+function checkPhotoAbort(signal){if(signal?.aborted)throw Object.assign(new Error('Подготовка фото отменена.'),{name:'AbortError'})}
+function photoPaint(){return new Promise(resolve=>{
+ let done=false;const finish=()=>{if(done)return;done=true;clearTimeout(timer);resolve()},timer=setTimeout(finish,100);
+ if(typeof window.requestAnimationFrame==='function')window.requestAnimationFrame(()=>setTimeout(finish,0));else setTimeout(finish,0);
+})}
 function wizard(){
  const w=S.w,s=sv(w.sv),seg=[0,1,2].map(i=>`<i class="${i<=S.step?'on':''}"></i>`).join('');
  const bar=`<div class="bar"><button id="bk" data-a="back" aria-label="Назад">${ic('back')}</button><div class="seg">${seg}</div></div><p class="step-label">Шаг ${S.step+1} из 3 · ${['Задача','Место и время','Контакт'][S.step]}</p>`;
  if(S.step===0)return bar+`<div class="hd"><h1>${s.q}</h1></div>
  <button class="pill svc selected-service" style="--c:${s.c}" data-a="sheet" data-v="svc"><span class="bg" aria-hidden="true">${ic(s.id)}</span><b>${s.n}</b><em>Изменить</em></button>
  <label class="field-label" for="desc">Описание <span style="font-weight:400;color:var(--mut)">· необязательно</span></label><div class="card input-card"><textarea rows="1" id="desc" class="task-input" data-f="desc" maxlength="1000" aria-describedby="err-desc" aria-invalid="${!!S.errors.desc}" placeholder="${s.ph}">${esc(w.desc)}</textarea></div>${error('desc')}
- <div class="sec"><b>Фото</b><small role="status">${(w.photos||[]).length?'Добавлено: '+w.photos.length+' из 5':'необязательно · до 5'}</small></div><p class="hint">Помогут точнее оценить стоимость.</p><p class="error" id="photo-error" role="alert">${esc(S.photoError)}</p><div class="photo-grid">${(w.photos||[]).map((p,i)=>`<div class="photo-item"><img src="${p.url}" alt="Фото ${i+1}"><button data-a="remove-photo" data-v="${i}" aria-label="Удалить фото ${i+1}">${ic('x')}</button></div>`).join('')}${(w.photos||[]).length<5?`<label class="photo-add" for="photo-input" role="button" tabindex="0" aria-disabled="${S.preparing}">${ic('cam')}<span>${S.preparing?'Подготовка…':'Добавить'}</span></label>`:''}</div>`;
+ <div class="sec"><b>Фото</b><small id="photo-count" role="status">${photoCountText()}</small></div><p class="hint">Помогут точнее оценить стоимость.</p><p class="error" id="photo-error" role="alert">${esc(S.photoError)}</p>${photoProgressPanel()}<div id="photo-grid" class="photo-grid" aria-busy="${S.preparing}">${photoTiles()}</div>`;
  if(S.step===1)return bar+`<div class="hd"><h1>${s.mv?'Откуда и куда?':'Куда приехать?'}</h1><p class="sub">Адрес и удобное время.</p></div>
  <section class="address-group" aria-label="${s.mv?'Точка А':'Место работы'}">${addressField('addr',s.mv?'Точка А — откуда забрать':'Адрес','Улица, дом, город')}${conditions('',s.mv?'В точке А':'Условия на месте',false)}</section>
  ${s.mv?`<section class="address-group" aria-label="Точка Б">${addressField('to','Точка Б — куда привезти','Улица, дом, город')}${conditions('to','В точке Б',false)}</section>`:''}
@@ -696,52 +736,99 @@ $('#go').onclick=()=>{
  S.errors=validate();if(Object.keys(S.errors).length){render();const first=Object.keys(S.errors)[0];$('#'+first)?.focus();return}
  hap();if(S.step<2){storeDraft();S.step++;S.anim='af';return render()}return submitOrder();
 };
-function readPhotoData(file){
- return new Promise((resolve,reject)=>{const reader=new FileReader();reader.onload=()=>resolve(reader.result);reader.onerror=()=>reject(new Error('Не удалось прочитать фото. Выберите его ещё раз.'));reader.readAsDataURL(file)});
+function readPhotoData(file,signal){
+ checkPhotoAbort(signal);
+ return new Promise((resolve,reject)=>{
+  const reader=new FileReader();let pending=true;
+  const finish=(error,value)=>{if(!pending)return;pending=false;clearTimeout(timer);signal?.removeEventListener('abort',abort);reader.onload=reader.onerror=reader.onabort=null;error?reject(error):resolve(value)};
+  const abort=()=>{finish(Object.assign(new Error('Подготовка фото отменена.'),{name:'AbortError'}));reader.abort?.()};
+  const timer=setTimeout(()=>{finish(new Error('Не удалось прочитать фото. Выберите его ещё раз.'));reader.abort?.()},20000);
+  reader.onload=()=>finish(null,reader.result);reader.onerror=()=>finish(new Error('Не удалось прочитать фото. Выберите его ещё раз.'));reader.onabort=abort;
+  signal?.addEventListener('abort',abort,{once:true});
+  try{reader.readAsDataURL(file)}catch(e){finish(e)}
+ });
 }
-async function decodePhoto(file){
+async function decodePhoto(file,signal){
+ checkPhotoAbort(signal);
  const image=new Image(),url=URL.createObjectURL(file);
  const load=source=>new Promise((resolve,reject)=>{
-  const timer=setTimeout(()=>{image.onload=image.onerror=null;reject(new Error('Фото не удалось открыть. Попробуйте JPEG или PNG.'))},12000);
-  image.onload=()=>{clearTimeout(timer);resolve()};image.onerror=()=>{clearTimeout(timer);reject(new Error('Фото не удалось открыть. Попробуйте JPEG или PNG.'))};image.src=source;
+  let pending=true;
+  const finish=error=>{if(!pending)return;pending=false;clearTimeout(timer);signal?.removeEventListener('abort',abort);image.onload=image.onerror=null;error?reject(error):resolve()};
+  const abort=()=>{finish(Object.assign(new Error('Подготовка фото отменена.'),{name:'AbortError'}));try{image.src=''}catch{}};
+  const timer=setTimeout(()=>finish(new Error('Фото не удалось открыть. Попробуйте JPEG или PNG.')),12000);
+  image.onload=()=>finish();image.onerror=()=>finish(new Error('Фото не удалось открыть. Попробуйте JPEG или PNG.'));
+  signal?.addEventListener('abort',abort,{once:true});
+  try{checkPhotoAbort(signal);image.src=source}catch(e){finish(e)}
  });
  try{
-  try{await load(url)}catch{await load(await readPhotoData(file))}
+  try{await load(url)}catch(e){if(e.name==='AbortError')throw e;await load(await readPhotoData(file,signal))}
+  checkPhotoAbort(signal);
   if(!image.naturalWidth||!image.naturalHeight)throw new Error('Не удалось прочитать фото.');
   return image;
  }finally{URL.revokeObjectURL(url)}
 }
-async function compressPhoto(file){
+function encodePhoto(canvas,signal){
+ checkPhotoAbort(signal);
+ return new Promise((resolve,reject)=>{
+  let pending=true;
+  const finish=(error,value)=>{if(!pending)return;pending=false;clearTimeout(timer);signal?.removeEventListener('abort',abort);error?reject(error):resolve(value)};
+  const abort=()=>finish(Object.assign(new Error('Подготовка фото отменена.'),{name:'AbortError'}));
+  const timer=setTimeout(()=>finish(new Error('Не удалось подготовить фото. Попробуйте выбрать его ещё раз.')),20000);
+  signal?.addEventListener('abort',abort,{once:true});
+  try{canvas.toBlob(value=>finish(null,value),'image/jpeg',.78)}catch(e){finish(e)}
+ });
+}
+async function compressPhoto(file,{signal,onStage}={}){
+ const stage=async text=>{checkPhotoAbort(signal);onStage?.(text);await photoPaint();checkPhotoAbort(signal)};
  const imageFile=file.type.startsWith('image/')||(!file.type&&/\.(jpe?g|png|webp|hei[cf])$/i.test(file.name||''));
  if(!imageFile||file.size>25*1024*1024)throw new Error('Выберите фото размером до 25 МБ.');
- const image=await decodePhoto(file);let size=1600,blob;
+ await stage('Открываем фото');
+ const image=await decodePhoto(file,signal);let size=1600,blob;
  for(let i=0;i<3;i++){
+  await stage('Подготавливаем фото');
   const scale=Math.min(1,size/Math.max(image.naturalWidth,image.naturalHeight));
   const canvas=document.createElement('canvas');canvas.width=Math.max(1,Math.round(image.naturalWidth*scale));canvas.height=Math.max(1,Math.round(image.naturalHeight*scale));
-  const ctx=canvas.getContext('2d');if(!ctx)throw new Error('Не удалось подготовить фото.');
-  ctx.fillStyle='#fff';ctx.fillRect(0,0,canvas.width,canvas.height);ctx.drawImage(image,0,0,canvas.width,canvas.height);
-  blob=await new Promise(resolve=>canvas.toBlob(resolve,'image/jpeg',.78));canvas.width=canvas.height=0;
+  try{
+   const ctx=canvas.getContext('2d');if(!ctx)throw new Error('Не удалось подготовить фото.');
+   ctx.fillStyle='#fff';ctx.fillRect(0,0,canvas.width,canvas.height);ctx.drawImage(image,0,0,canvas.width,canvas.height);
+   blob=await encodePhoto(canvas,signal);
+  }finally{canvas.width=canvas.height=0}
+  checkPhotoAbort(signal);
   if(blob&&blob.size<=2*1024*1024)break;size=1000-i*250;
  }
  if(!blob||blob.size>2*1024*1024)throw new Error('Не удалось уменьшить фото. Выберите другой снимок.');
+ await stage('Создаём предпросмотр');
  // A small data URL keeps the thumbnail stable when iOS suspends the photo picker/WebView.
  const thumb=document.createElement('canvas'),scale=Math.min(1,320/Math.max(image.naturalWidth,image.naturalHeight));
  thumb.width=Math.max(1,Math.round(image.naturalWidth*scale));thumb.height=Math.max(1,Math.round(image.naturalHeight*scale));
  const ctx=thumb.getContext('2d');if(!ctx)throw new Error('Не удалось подготовить миниатюру.');
  ctx.fillStyle='#fff';ctx.fillRect(0,0,thumb.width,thumb.height);ctx.drawImage(image,0,0,thumb.width,thumb.height);
- const url=thumb.toDataURL('image/jpeg',.7);thumb.width=thumb.height=0;
+ let url;try{url=thumb.toDataURL('image/jpeg',.7)}finally{thumb.width=thumb.height=0}
+ checkPhotoAbort(signal);
  return {blob,url};
 }
 async function addPhotos(files){
  const w=S.w;if(!w||S.preparing)return;
- w.photos=w.photos||[];S.preparing=true;S.photoError='';
- const y=$('#view').scrollTop;render();$('#view').scrollTop=y;
+ w.photos=w.photos||[];const incoming=Array.from(files),available=5-w.photos.length,selected=incoming.slice(0,available);
+ S.photoError=incoming.length>available?'Можно добавить до 5 фотографий.':'';
+ if(!selected.length){render(true);return}
+ const job={w,controller:new AbortController(),progress:{total:selected.length,done:0,stage:'Открываем фото'}};
+ const active=()=>photoJob===job&&!job.controller.signal.aborted&&S.w===w;
+ photoJob=job;S.preparing=true;S.photoProgress=job.progress;render(true);updatePhotoPreparationUi();$('#photo-progress')?.scrollIntoView?.({block:'nearest',behavior:'auto'});
  try{
-  for(const file of files){
-   if(w.photos.length>=5){S.photoError='Можно добавить до 5 фотографий.';break}
-   try{const photo=await compressPhoto(file);w.photos.push(photo);if(S.w===w){render(true);$('#view').scrollTop=y}}catch(e){S.photoError=e.message}
+  await photoPaint();
+  for(const file of selected){
+   if(!active())break;
+   try{
+    const photo=await compressPhoto(file,{signal:job.controller.signal,onStage:stage=>{if(active()){job.progress.stage=stage;updatePhotoPreparationUi()}}});
+    if(!active()){if(photo?.url?.startsWith('blob:'))URL.revokeObjectURL(photo.url);break}
+    w.photos.push(photo);storeDraft();
+   }catch(e){if(!active()||e.name==='AbortError')break;S.photoError=e.message}
+   job.progress.done++;job.progress.stage='Открываем фото';updatePhotoPreparationUi(true);await photoPaint();
   }
- }finally{S.preparing=false;if(S.w===w){storeDraft();render();$('#view').scrollTop=y}}
+ }finally{
+  if(photoJob===job){photoJob=null;S.preparing=false;S.photoProgress=null;if(S.w===w){storeDraft();render(true)}}
+ }
 }
 function fitTextarea(field){
  const width=String(field.clientWidth);
@@ -759,7 +846,7 @@ function fitTextareas(){document.querySelectorAll('#view .input-card textarea').
 window.addEventListener('resize',()=>requestAnimationFrame(fitTextareas));
 function render(preserve=false){edgeBack.cancel();const oldScroll=$('#view').scrollTop;const wiz=!!S.w,v=$('#view');const active=document.activeElement;if(active&&v.contains(active)&&active.matches('input,textarea,select'))active.blur();v.className=S.anim;S.anim='';v.innerHTML=wiz?wizard():({home,orders,done}[S.tab]||home)();fitTextareas();v.scrollTop=preserve?oldScroll:0;if(!preserve)v.focus({preventScroll:true});$('#dock').hidden=!wiz&&S.tab!=='done';$('#tabs').hidden=wiz||S.tab==='done';if(!wiz&&S.tab==='done'){$('#go').disabled=S.sending;$('#go').textContent=S.sending?'Отправляем…':S.last?.businessStatus==='quoted'?(S.discussing?'Отправить вопрос':'Подходит, согласовать'):'Мои заявки';}document.querySelectorAll('#tabs button').forEach(b=>b.setAttribute('aria-current',b.dataset.v===S.tab));if(inTg)(wiz||S.tab==='done')?tg.BackButton.show():tg.BackButton.hide();if(wiz)refresh();$('#view').inert=S.sending;scheduleStatuses()}
 const keep=fn=>{const y=$('#view').scrollTop;fn();render();$('#view').scrollTop=y};
-document.addEventListener('click',e=>{const b=e.target.closest('[data-a]');if(!b)return;const a=b.dataset.a,v=b.dataset.v,k=b.dataset.k,w=S.w;if(S.sending||S.preparing||S.organizing)return;hap();
+document.addEventListener('click',e=>{const b=e.target.closest('[data-a]');if(!b)return;const a=b.dataset.a,v=b.dataset.v,k=b.dataset.k,w=S.w;if(a==='cancel-photos')return cancelPhotoPreparation();if(a==='back'&&S.preparing)return back();if(S.sending||S.preparing||S.organizing)return;hap();
  if(a==='discuss-quote'){S.discussing=true;S.discussionText='';S.discussionVersion=S.last.statusVersion;S.decisionError='';return render(true)}
  if(a==='cancel-discussion'){S.discussing=false;return render(true)}
  if(a==='share-phone')return requestPhone();

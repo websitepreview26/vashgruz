@@ -20,7 +20,7 @@ function client({live=false,fetcher,initialOrders}={}){
     return new Element();
   }};
   class FakeImage{naturalWidth=3000;naturalHeight=2000;set src(v){this.onload()}}
-  const context={window:{VG_CONFIG:{apiBase:live?'https://api.example':''},...(live?{Telegram:{WebApp:tg}}:{}),addEventListener(){}},document:doc,matchMedia:()=>({matches:false}),localStorage:{getItem:k=>storage.get(k)||null,setItem:(k,v)=>storage.set(k,v)},crypto,FormData,Blob,File,FileReader:class{readAsDataURL(){this.result='data:image/jpeg;base64,original';this.onload()}},Image:FakeImage,AbortSignal,Date,setTimeout,clearTimeout,requestAnimationFrame:()=>0,cancelAnimationFrame(){},performance,fetch:(url,opts)=>url.endsWith('/api/contact')?Promise.resolve(Response.json({ok:true,phone:''})):fetcher(url,opts),URL:{createObjectURL(){const u='blob:test-'+(++counter);urls.add(u);return u},revokeObjectURL:u=>urls.delete(u)}};
+  const context={window:{VG_CONFIG:{apiBase:live?'https://api.example':''},...(live?{Telegram:{WebApp:tg}}:{}),addEventListener(){}},document:doc,matchMedia:()=>({matches:false}),localStorage:{getItem:k=>storage.get(k)||null,setItem:(k,v)=>storage.set(k,v)},crypto,FormData,Blob,File,FileReader:class{readAsDataURL(){this.result='data:image/jpeg;base64,original';this.onload()}},Image:FakeImage,AbortController,AbortSignal,Date,setTimeout,clearTimeout,requestAnimationFrame:()=>0,cancelAnimationFrame(){},performance,fetch:(url,opts)=>url.endsWith('/api/contact')?Promise.resolve(Response.json({ok:true,phone:''})):fetcher(url,opts),URL:{createObjectURL(){const u='blob:test-'+(++counter);urls.add(u);return u},revokeObjectURL:u=>urls.delete(u)}};
   vm.createContext(context);vm.runInContext(script,context);
   return {run:s=>vm.runInContext(s,context),node,storage,context,urls,tg};
 }
@@ -282,4 +282,56 @@ test('production: phone cache is scoped to authenticated user and API without im
  const c=client({live:true});c.storage.set('vg-phone:42','+375291234567');
  assert.equal(c.run('cachedPhone()'),'');assert.equal(c.run('PHONE_STORAGE_KEY'),'vg-phone-v2:42:https://api.example');
  c.run("cachePhone('+375299999999')");assert.equal(c.run('cachedPhone()'),'+375299999999');assert.equal(c.storage.get('vg-phone-v2:42:https://api.example'),'+375299999999');
+});
+
+async function waitForPhotoState(condition){
+ for(let i=0;i<200;i++){if(condition())return;await new Promise(resolve=>setTimeout(resolve,0))}
+ assert.fail('Photo preparation did not reach the expected state');
+}
+function heldPhotoPreparation(c){
+ const jobs=[];
+ c.context.compressPhoto=(file,options)=>{options.onStage('Подготавливаем фото');return new Promise((resolve,reject)=>jobs.push({file,...options,resolve,reject}))};
+ return jobs;
+}
+const preparedPhoto=()=>({blob:new Blob(['ready'],{type:'image/jpeg'}),url:'data:image/jpeg;base64,ready'});
+
+test('photo progress: selected photos show live processed count and are not uploaded before order submission',async()=>{
+ const uploads=[],c=client({live:true,fetcher:async(...args)=>{uploads.push(args);return Response.json({ok:true})}}),jobs=heldPhotoPreparation(c);
+ c.run("S.w=newW('trash');render()");c.context.files=[new File(['a'],'a.jpg',{type:'image/jpeg'}),new File(['b'],'b.jpg',{type:'image/jpeg'})];
+ const pending=c.run('addPhotos(files)');assert.equal(c.run('S.preparing'),true);assert.match(c.node('#view').innerHTML,/photo-progress/);assert.match(c.node('#view').innerHTML,/Отменить/);assert(c.node('#go').disabled);
+ await waitForPhotoState(()=>jobs.length===1);assert.equal(c.node('#photo-progress-title').textContent,'Фото 1 из 2');assert.equal(c.node('#photo-progress-bar').value,0);
+ jobs[0].resolve(preparedPhoto());await waitForPhotoState(()=>jobs.length===2);
+ assert.equal(c.node('#photo-progress-title').textContent,'Фото 2 из 2');assert.equal(c.node('#photo-progress-bar').value,1);assert.equal(c.run('S.w.photos.length'),1);assert.match(c.node('#photo-grid').innerHTML,/base64,ready/);
+ jobs[1].resolve(preparedPhoto());await pending;assert.equal(c.run('S.preparing'),false);assert.equal(c.run('S.photoProgress'),null);assert.equal(c.run('S.w.photos.length'),2);assert.equal(uploads.length,0);assert.equal(c.node('#go').disabled,false);
+});
+test('photo progress: cancelling keeps ready photos and ignores late work from the cancelled batch',async()=>{
+ const c=client(),jobs=heldPhotoPreparation(c);c.run("S.w=newW('trash');render()");c.context.files=[new File(['a'],'a.jpg'),new File(['b'],'b.jpg')];
+ const pending=c.run('addPhotos(files)');await waitForPhotoState(()=>jobs.length===1);jobs[0].resolve(preparedPhoto());await waitForPhotoState(()=>jobs.length===2);
+ c.run('cancelPhotoPreparation()');assert.equal(c.run('S.preparing'),false);assert.equal(jobs[1].signal.aborted,true);assert.equal(c.run('S.w.photos.length'),1);assert.equal(c.node('#go').disabled,false);
+ jobs[1].resolve(preparedPhoto());await pending;assert.equal(c.run('S.w.photos.length'),1);assert.equal(c.run('S.photoError'),'');assert.equal(JSON.parse(c.storage.get(c.run('ORDER_STORAGE_KEY')))[0].photoCount,1);
+});
+test('photo progress: late completion cannot cancel or corrupt a newer selection',async()=>{
+ const c=client(),jobs=heldPhotoPreparation(c);c.run("S.w=newW('trash');render()");c.context.files=[new File(['a'],'a.jpg')];
+ const old=c.run('addPhotos(files)');await waitForPhotoState(()=>jobs.length===1);c.run('cancelPhotoPreparation()');
+ const current=c.run('addPhotos(files)');await waitForPhotoState(()=>jobs.length===2);jobs[0].resolve(preparedPhoto());await old;
+ assert.equal(c.run('S.preparing'),true);assert.equal(c.run('S.w.photos.length'),0);assert.equal(c.run('S.photoProgress.total'),1);
+ jobs[1].resolve(preparedPhoto());await current;assert.equal(c.run('S.w.photos.length'),1);assert.equal(c.run('S.preparing'),false);
+});
+test('photo progress: cancel interrupts image decoding and releases its object URL',async()=>{
+ const c=client();c.context.Image=class{naturalWidth=1000;naturalHeight=1000;set src(value){this.source=value}};
+ c.run("S.w=newW('trash');render()");c.context.files=[new File(['a'],'a.jpg',{type:'image/jpeg'})];
+ const pending=c.run('addPhotos(files)');await waitForPhotoState(()=>c.urls.size===1);c.run('cancelPhotoPreparation()');await pending;
+ assert.equal(c.urls.size,0);assert.equal(c.run('S.preparing'),false);assert.equal(c.run('S.w.photos.length'),0);assert.equal(c.run('S.photoError'),'');
+});
+test('photo progress: back cancels preparation immediately and keeps the draft',async()=>{
+ const c=client(),jobs=heldPhotoPreparation(c);c.run("S.w=newW('trash');S.w.desc='Диван';render()");c.context.files=[new File(['a'],'a.jpg')];
+ const pending=c.run('addPhotos(files)');await waitForPhotoState(()=>jobs.length===1);c.run('back()');
+ assert.equal(c.run('S.w'),null);assert.equal(c.run('S.preparing'),false);assert.equal(c.run('S.tab'),'home');assert.equal(c.run('S.orders[0].desc'),'Диван');
+ jobs[0].resolve(preparedPhoto());await pending;assert.equal(c.run('S.w'),null);assert.equal(c.run('S.tab'),'home');
+});
+test('photo progress: a failed photo advances the batch and does not leave the interface locked',async()=>{
+ const c=client(),jobs=heldPhotoPreparation(c);c.run("S.w=newW('trash');render()");c.context.files=[new File(['a'],'a.jpg'),new File(['b'],'b.jpg')];
+ const pending=c.run('addPhotos(files)');await waitForPhotoState(()=>jobs.length===1);jobs[0].reject(Error('Не удалось прочитать фото'));
+ await waitForPhotoState(()=>jobs.length===2);assert.equal(c.node('#photo-progress-bar').value,1);assert.equal(c.run('S.w.photos.length'),0);jobs[1].resolve(preparedPhoto());await pending;
+ assert.equal(c.run('S.preparing'),false);assert.equal(c.run('S.w.photos.length'),1);assert.match(c.run('S.photoError'),/Не удалось прочитать/);assert.equal(c.node('#go').disabled,false);
 });
