@@ -370,7 +370,7 @@ if (inTg) tg.BackButton.onClick(back);
 function back(animated=true){if(S.sending||S.organizing)return;if(S.preparing)cancelPhotoPreparation(false);hap();if(S.discussing){S.discussing=false;return render(true)}if(S.sheet)return close();S.errors={};S.anim=animated===false?'':'ab';if(S.w&&S.step>0){storeDraft();S.step--;}else{if(S.w)storeDraft();const wasDone=S.tab==='done';S.w=null;S.tab=wasDone?'orders':'home'}render()}
 function home(){
  const draft=S.orders.find(o=>o.status==='draft');
- return `<section class="home-original"><div class="hrow"><h1>Что нужно вывезти<br>или перевезти?</h1></div>
+ return `<section class="home-original"><div class="hrow"><h1>Что нужно вывезти?</h1></div>
  ${draft?`<div class="draft-resume"><button class="quick-row resume" data-a="open-request" data-v="${esc(draft.id)}">${ic('list')}<div><b>Продолжить заполнение</b><small>${esc(sv(draft.sv).n)}</small></div>${ic('chev')}</button><button class="draft-delete" data-a="draft-delete" data-v="${esc(draft.id)}" aria-label="Удалить черновик">${ic('trash')}</button></div>`:''}
  <div class="sec home-section"><b>Услуги</b><small>цена за час</small></div>
  <div class="grid">${SV.filter(s=>!s.hidden).map(s=>`<button class="svc" style="--c:${s.c}" data-a="start" data-v="${s.id}"><span class="bg">${ic(s.id)}</span><b>${s.n}</b><small>${s.r?'от '+s.r+' BYN':'по оценке'}</small></button>`).join('')}</div></section>`;
