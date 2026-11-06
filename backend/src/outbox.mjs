@@ -15,6 +15,7 @@ export function createOutbox({stmt,telegram,edit,sendManagerControls}){
     WHERE id=? AND state='pending' AND available_at<=? AND NOT EXISTS
     (SELECT 1 FROM delivery_outbox other WHERE other.order_id=delivery_outbox.order_id AND other.state='sending')`,token,Date.now()+120000,task.id,Date.now()).run();
    if(!lock.meta.changes)continue;
+   const review=task.id===`review:${task.order_id}:sendMessage`;
    try{
     if(task.kind==='sendMessage'&&JSON.parse(task.payload).managerControls===true){
      const row=await stmt(env,'SELECT * FROM orders WHERE id=?',task.order_id).first();
@@ -42,14 +43,15 @@ export function createOutbox({stmt,telegram,edit,sendManagerControls}){
      }
      for(const [k,v] of Object.entries(params))form.set(k,typeof v==='object'?JSON.stringify(v):String(v));
      try{await telegram(env,'sendMessage',form)}catch(e){
-      if(e.code==='DELIVERY'&&e.telegramCode===400&&form.has('reply_markup')){form.delete('reply_markup');await telegram(env,'sendMessage',form)}else throw e;
+      if(!review&&e.code==='DELIVERY'&&e.telegramCode===400&&form.has('reply_markup')){form.delete('reply_markup');await telegram(env,'sendMessage',form)}else throw e;
      }
     }
     await stmt(env,"UPDATE delivery_outbox SET state='sent',last_error='',lease_token='' WHERE id=? AND lease_token=?",task.id,token).run();
    }catch(e){
     const ambiguous=task.kind!=='edit'&&(!['RATE','DELIVERY'].includes(e.code));
     const delay=Math.max(e.retryAfter||0,Math.min(3600,15*2**Math.min(task.attempts,8)))*1000;
-    await stmt(env,"UPDATE delivery_outbox SET state=?,available_at=?,last_error=?,lease_token='' WHERE id=? AND lease_token=?",ambiguous?'uncertain':(e.telegramCode===403||task.attempts>=9)?'failed':'pending',Date.now()+delay,['RATE','DELIVERY','UNCERTAIN'].includes(e.code)?e.code:'INTERNAL',task.id,token).run();
+    const permanent=e.telegramCode===403||(review&&e.telegramCode===400)||task.attempts>=9;
+    await stmt(env,"UPDATE delivery_outbox SET state=?,available_at=?,last_error=?,lease_token='' WHERE id=? AND lease_token=?",ambiguous?'uncertain':permanent?'failed':'pending',Date.now()+delay,['RATE','DELIVERY','UNCERTAIN'].includes(e.code)?e.code:'INTERNAL',task.id,token).run();
    }
   }
  }

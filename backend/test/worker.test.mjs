@@ -34,6 +34,8 @@ function env(){
   sqlite.exec(readFileSync(new URL('../migrations/0008_security.sql',import.meta.url),'utf8'));
   sqlite.exec(readFileSync(new URL('../migrations/0009_bot_chat.sql',import.meta.url),'utf8'));
   sqlite.exec(readFileSync(new URL('../migrations/0010_welcome_photo.sql',import.meta.url),'utf8'));
+  sqlite.exec(readFileSync(new URL('../migrations/0011_quote_drafts.sql',import.meta.url),'utf8'));
+  sqlite.exec(readFileSync(new URL('../migrations/0012_review_requests.sql',import.meta.url),'utf8'));
   return {MINI_APP_URL:'https://websitepreview26.github.io/vashgruz/',BOT_USERNAME:'vash_gruz_test_bot',BOT_TOKEN:TOKEN,TELEGRAM_CHAT_ID:'-100123456789',ALLOWED_ORIGIN:ORIGIN,DB:{
     prepare(sql){return {bind(...args){return {
       sql,args,
@@ -230,8 +232,8 @@ test('per-user hourly limit and bounded body size',async()=>{
 
 const WEBHOOK_SECRET='test-webhook-secret-with-more-than-32-characters';
 async function listRequest(init){return new Request('https://api.example/api/orders/list',{method:'POST',headers:{origin:ORIGIN,'content-type':'application/json'},body:JSON.stringify({initData:init||await auth()})})}
-function callbackRequest(id,version,action,{secret=WEBHOOK_SECRET,actor=77,chat=-100123456789,message=100,callbackId=crypto.randomUUID()}={}){
- return new Request('https://api.example/telegram/webhook',{method:'POST',headers:{'content-type':'application/json','X-Telegram-Bot-Api-Secret-Token':secret},body:JSON.stringify({callback_query:{id:callbackId,from:{id:actor},data:`vg:${id}:${version}:${action}`,message:{message_id:message,chat:{id:chat},text:'Новая заявка\\n\\nСтатус: Получена'}}})});
+function callbackRequest(id,version,action,{secret=WEBHOOK_SECRET,actor=77,chat=-100123456789,message=100,callbackId=crypto.randomUUID(),data=`vg:${id}:${version}:${action}`}={}){
+ return new Request('https://api.example/telegram/webhook',{method:'POST',headers:{'content-type':'application/json','X-Telegram-Bot-Api-Secret-Token':secret},body:JSON.stringify({callback_query:{id:callbackId,from:{id:actor},data,message:{message_id:message,chat:{id:chat},text:'Новая заявка\\n\\nСтатус: Получена'}}})});
 }
 function managerMock(role='administrator'){
  return telegramMock(method=>{
@@ -258,6 +260,7 @@ test('manager can assess but cannot accept for customer or mark work completed',
  const e={...env(),TELEGRAM_WEBHOOK_SECRET:WEBHOOK_SECRET};managerMock();const {id}=await (await worker.fetch(await request(),e)).json();
  await worker.fetch(callbackRequest(id,0,'processing'),e);
  await worker.fetch(callbackRequest(id,1,'confirmed'),e);await worker.fetch(callbackRequest(id,1,'completed'),e);
+ await worker.fetch(callbackRequest(id,1,'fulfilled'),e);await worker.fetch(callbackRequest(id,1,'review'),e);
  assert.equal(e.sqlite.prepare('SELECT business_status FROM orders').get().business_status,'processing');
 });
 test('forged webhook, foreign chat, ordinary members and wrong message cannot change status',async()=>{
@@ -309,14 +312,123 @@ test('Telegram contact is accepted only from its owner in private chat',async()=
 });
 
 function priceMessage(promptId,text,messageId=500,actor=77){return new Request('https://api.example/telegram/webhook',{method:'POST',headers:{'X-Telegram-Bot-Api-Secret-Token':WEBHOOK_SECRET},body:JSON.stringify({message:{message_id:messageId,chat:{id:-100123456789,type:'supergroup'},from:{id:actor},text,reply_to_message:{message_id:promptId}}})})}
-async function quoteFixture(){
+async function priceFixture(){
  const e={...env(),TELEGRAM_WEBHOOK_SECRET:WEBHOOK_SECRET},calls=managerMock();const {id}=await (await worker.fetch(await request(),e)).json();
  await worker.fetch(callbackRequest(id,0,'processing'),e);await worker.fetch(callbackRequest(id,1,'price'),e);
  const prompt=e.sqlite.prepare('SELECT message_id FROM quote_prompts').get();assert(prompt);
- await worker.fetch(priceMessage(prompt.message_id,'150,50\nВынос и машина включены'),e);
  return {e,calls,id,promptId:prompt.message_id};
 }
+async function quoteFixture(){
+ const fixture=await priceFixture();
+ await worker.fetch(priceMessage(fixture.promptId,'150,50\nВынос и машина включены'),fixture.e);
+ return fixture;
+}
+function draftCallback(data,actor=77){
+ return new Request('https://api.example/telegram/webhook',{
+  method:'POST',headers:{'X-Telegram-Bot-Api-Secret-Token':WEBHOOK_SECRET},
+  body:JSON.stringify({callback_query:{id:crypto.randomUUID(),from:{id:actor},data,message:{message_id:102,chat:{id:-100123456789}}}})
+ });
+}
 async function decisionRequest(id,version,action,{init,actionId=crypto.randomUUID(),note=''}={}){return new Request('https://api.example/api/orders/decision',{method:'POST',headers:{origin:ORIGIN,'content-type':'application/json'},body:JSON.stringify({initData:init||await auth(),id,version,action,actionId,note})})}
+
+async function fulfilledFixture(){
+ const {e,id,calls}=await quoteFixture();
+ assert.equal((await worker.fetch(await decisionRequest(id,2,'accept'),e)).status,200);
+ assert.match(calls.findLast(c=>c.method==='editMessageText').form.get('reply_markup'),/Отметить выполненным/);
+ await worker.fetch(callbackRequest(id,3,'fulfilled'),e);
+ const list=await (await worker.fetch(await listRequest(),e)).json();
+ assert.equal(list.orders[0].businessStatus,'fulfilled');
+ assert.equal(list.orders[0].customerVisibility,'archived');
+ assert.match(calls.findLast(c=>c.method==='editMessageText').form.get('reply_markup'),/Попросить отзыв/);
+ return {e,id};
+}
+async function openReview(e,id){
+ await worker.fetch(callbackRequest(id,4,'review'),e);
+ const prompt=e.sqlite.prepare('SELECT MAX(message_id) AS id FROM review_prompts').get().id;
+ assert(prompt);
+ return (action='send',actor=77,message=prompt)=>callbackRequest(id,4,null,{data:'vr:'+action,actor,message});
+}
+const privateSends=calls=>calls.filter(c=>c.method==='sendMessage'&&c.form.get('chat_id')==='42');
+
+test('review preview requires confirmation from its manager and sends once per order',async()=>{
+ const {e,id}=await fulfilledFixture(),calls=managerMock();
+ const cancelled=await openReview(e,id);
+ const preview=calls.find(c=>c.method==='sendMessage');
+ assert.match(preview.form.get('text'),new RegExp(id+'.*\\nПолучатель: Тест · Telegram ID 42'));
+ assert.match(preview.form.get('text'),/как прошла перевозка/);
+ await worker.fetch(cancelled('send',78),e);
+ await worker.fetch(cancelled('send',77,999),e);
+ await worker.fetch(cancelled('cancel'),e);
+ await worker.fetch(cancelled(),e);
+ assert.equal(privateSends(calls).length,0);
+ const confirm=await openReview(e,id);
+ await Promise.all([worker.fetch(confirm(),e),worker.fetch(confirm(),e)]);
+ await maintenance(e);
+ const sends=privateSends(calls);
+ assert.equal(sends.length,1);
+ assert.equal(JSON.parse(sends[0].form.get('reply_markup')).inline_keyboard[0][0].url,'https://g.page/r/CS-oVH2LXZftEAI/review');
+ assert.match(calls.findLast(c=>c.method==='editMessageText').form.get('text'),/Приглашение отправлено · \d/);
+ assert.doesNotMatch(calls.findLast(c=>c.method==='editMessageText').form.get('reply_markup'),/Попросить отзыв/);
+});
+
+test('review rejection provides copy text and a lost response does not retry',async()=>{
+ for(const code of [400,403,null]){
+  const {e,id}=await fulfilledFixture();
+  const calls=telegramMock((method,history)=>{
+   if(method==='getChatMember')return Response.json({ok:true,result:{status:'administrator'}});
+   if(method==='sendMessage'&&history.at(-1).form.get('chat_id')==='42'){
+    if(code)return Response.json({ok:false,error_code:code},{status:code});
+    throw Error('Lost response');
+   }
+  });
+  const confirm=await openReview(e,id);
+  await worker.fetch(confirm(),e);
+  await worker.fetch(confirm(),e);
+  await maintenance(e);
+  assert.equal(privateSends(calls).length,1);
+  const card=calls.findLast(c=>c.method==='editMessageText').form;
+  assert.match(card.get('text'),code?/Не удалось отправить приглашение/:/Отправка приглашения требует проверки/);
+  if(code){
+   const button=JSON.parse(card.get('reply_markup')).inline_keyboard[0][0];
+   assert.match(button.copy_text.text,/https:\/\/g.page\/r\/CS-oVH2LXZftEAI\/review/);
+  }else assert.doesNotMatch(card.get('reply_markup'),/copy_text|Попросить отзыв/);
+ }
+});
+
+test('scheduled maintenance adds completion to existing accepted cards',async()=>{
+ const {e,id}=await quoteFixture();
+ assert.equal((await worker.fetch(await decisionRequest(id,2,'accept'),e)).status,200);
+ e.sqlite.exec("UPDATE orders SET buttons_version=1 WHERE business_status='accepted'");
+ const calls=managerMock();
+ await maintenance(e);
+ await maintenance(e);
+ const edits=calls.filter(c=>c.method==='editMessageText');
+ assert.equal(edits.length,1);
+ assert.match(edits[0].form.get('reply_markup'),new RegExp(id+':3:fulfilled'));
+ assert.equal(privateSends(calls).length,0);
+});
+
+test('a deferred review updates the card when Telegram accepts the scheduled retry',async()=>{
+ const {e,id}=await fulfilledFixture();
+ let limited=true;
+ const calls=telegramMock((method,history)=>{
+  if(method==='getChatMember')return Response.json({ok:true,result:{status:'administrator'}});
+  if(method==='sendMessage'&&history.at(-1).form.get('chat_id')==='42'&&limited){
+   return Response.json({ok:false,error_code:429,parameters:{retry_after:90}},{status:429});
+  }
+ });
+ const confirm=await openReview(e,id);
+ await worker.fetch(confirm(),e);
+ assert.match(calls.findLast(c=>c.method==='editMessageText').form.get('text'),/Приглашение ожидает отправки/);
+ await maintenance(e);
+ assert.equal(privateSends(calls).length,1);
+ limited=false;
+ e.sqlite.exec("UPDATE delivery_outbox SET available_at=0 WHERE state='pending'");
+ await maintenance(e);
+ await maintenance(e);
+ assert.equal(privateSends(calls).length,2);
+ assert.match(calls.findLast(c=>c.method==='editMessageText').form.get('text'),/Приглашение отправлено · \d/);
+});
 
 test('quote parser uses integer kopecks and requires clear nonzero price',()=>{
  assert.deepEqual(parseQuote('150,50 BYN\nВсё включено'),{amount:15050,note:'Всё включено'});
@@ -330,6 +442,38 @@ test('manager publishes a real quote with conditions and notifies the customer',
  assert(calls.some(c=>c.method==='sendMessage'&&c.form.get('chat_id')==='42'&&c.form.get('reply_markup').includes('web_app')&&c.form.get('reply_markup').includes('?order=')));
  const count=e.sqlite.prepare('SELECT COUNT(*) n FROM order_status_events').get().n;
  await worker.fetch(priceMessage(promptId,'150,50\nВынос и машина включены'),e);assert.equal(e.sqlite.prepare('SELECT COUNT(*) n FROM order_status_events').get().n,count);
+});
+test('manager can confirm a price and comment entered on one line',async()=>{
+ const {e,calls,promptId}=await priceFixture();
+ assert.equal((await worker.fetch(priceMessage(promptId,'150,50 руб. — с погрузкой'),e)).status,200);
+ const preview=calls.find(c=>c.method==='sendMessage'&&c.form.get('text').includes('Проверьте предложение'));
+ assert.match(preview.form.get('text'),/Цена: 150,5 BYN\nКомментарий: с погрузкой/);
+ const [send]=JSON.parse(preview.form.get('reply_markup')).inline_keyboard[0];
+ assert.equal((await (await worker.fetch(await listRequest(),e)).json()).orders[0].quote,null);
+ await worker.fetch(draftCallback(send.callback_data,88),e);
+ assert.equal(e.sqlite.prepare('SELECT business_status FROM orders').get().business_status,'processing');
+ await worker.fetch(draftCallback(send.callback_data),e);
+ await worker.fetch(draftCallback(send.callback_data),e);
+ const {quote}=(await (await worker.fetch(await listRequest(),e)).json()).orders[0];
+ assert.deepEqual(quote,{amountMinor:15050,currency:'BYN',note:'с погрузкой',revision:1});
+ assert.equal(calls.filter(c=>c.method==='sendMessage'&&c.form.get('chat_id')==='42').length,1);
+});
+test('invalid prices and rejected previews let the manager reply to a fresh prompt',async()=>{
+ const {e,calls,promptId}=await priceFixture();
+ await worker.fetch(priceMessage(promptId,'1 500 с погрузкой'),e);
+ const retry=calls.at(-1);
+ assert.match(retry.form.get('text'),/не удалось распознать/);
+ assert.equal(JSON.parse(retry.form.get('reply_markup')).force_reply,true);
+ const latestPrompt=()=>e.sqlite.prepare('SELECT message_id FROM quote_prompts ORDER BY message_id DESC').get().message_id;
+ assert.notEqual(latestPrompt(),promptId);
+ await worker.fetch(priceMessage(latestPrompt(),'150 с погрузкой',501),e);
+ const [send,edit]=JSON.parse(calls.at(-1).form.get('reply_markup')).inline_keyboard[0];
+ await worker.fetch(draftCallback(edit.callback_data),e);
+ assert.equal(JSON.parse(calls.at(-2).form.get('reply_markup')).force_reply,true);
+ await worker.fetch(draftCallback(send.callback_data),e);
+ assert.equal(e.sqlite.prepare('SELECT business_status FROM orders').get().business_status,'processing');
+ await worker.fetch(priceMessage(latestPrompt(),'160',502),e);
+ assert.equal(e.sqlite.prepare('SELECT quote_amount_minor FROM orders').get().quote_amount_minor,16000);
 });
 test('only customer can accept a quote; repeated decision does not duplicate notification',async()=>{
  const {e,calls,id}=await quoteFixture();const actionId=crypto.randomUUID();

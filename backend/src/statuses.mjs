@@ -14,8 +14,19 @@ export function compactCaption(text){
  }
  return lines.join('\n');
 }
-export const STATUS_LABELS={received:'Заявка получена',processing:'На оценке',quoted:'Предложение готово',discussion:'Уточняем условия',accepted:'Стоимость принята',cancelled:'Заявка закрыта',confirmed:'Согласовано ранее',completed:'Архив'};
-const terminal=new Set(['accepted','cancelled','confirmed','completed']);
+export const STATUS_LABELS={received:'Заявка получена',processing:'На оценке',quoted:'Предложение готово',discussion:'Уточняем условия',accepted:'Стоимость принята',fulfilled:'Заказ выполнен',cancelled:'Заявка закрыта',confirmed:'Согласовано ранее',completed:'Архив'};
+const terminal=new Set(['accepted','fulfilled','cancelled','confirmed','completed']);
+const reviewText='Спасибо, что воспользовались услугами «Ваш груз»! Если у вас есть минутка, расскажите в Google, как прошла перевозка. Нам важно ваше мнение.';
+const reviewUrl='https://g.page/r/CS-oVH2LXZftEAI/review';
+const reviewButton={text:'Оставить отзыв в Google',url:reviewUrl};
+const reviewTaskId=id=>`review:${id}:sendMessage`;
+const reviewStateLabel={
+ pending:'Приглашение ожидает отправки',sending:'Приглашение отправляется',
+ sent:'Приглашение отправлено',failed:'Не удалось отправить приглашение',
+ uncertain:'Отправка приглашения требует проверки'
+};
+const reviewDate=new Intl.DateTimeFormat('ru-RU',{timeZone:'Europe/Minsk',dateStyle:'short',timeStyle:'short'});
+const canQuote=row=>row?.state==='sent'&&['processing','discussion','quoted'].includes(row.business_status);
 export const money=minor=>(minor/100).toLocaleString('ru-RU',{maximumFractionDigits:2})+' BYN';
 export function parseQuote(text){
  const [first,...rest]=String(text||'').trim().split('\n');
@@ -24,13 +35,27 @@ export function parseQuote(text){
  const amount=Number(match[1])*100+Number((match[2]||'').padEnd(2,'0')),note=rest.join('\n').trim();
  return amount>0&&note.length<=600?{amount,note}:null;
 }
+function parseQuoteWithInlineNote(text){
+ const parts=/^(\d+(?:[.,]\d+)?(?:[^\S\n]*(?:BYN|руб\.?))?)([\s\S]*)$/i.exec(text.trim());
+ if(!parts)return null;
+ const note=/^(?:[^\S\n]*[-—–:,]|[^\S\n]+)[^\S\n]*(\p{L}[\s\S]*)$/u.exec(parts[2]);
+ return note?parseQuote(parts[1]+'\n'+note[1]):null;
+}
   function managerText(row,message){
    const w=JSON.parse(row.payload),base=row.manager_text||message?.text?.replace(/\n\nСтатус: [^\n]*$/,'')||[`Заявка на оценку ${row.id}`,w.desc||'Без описания',`Адрес: ${w.addr}`,w.to?`Куда: ${w.to}`:'',`Телефон: ${w.phone}`,`Клиент ID ${row.user_id}`].filter(Boolean).join('\n');
-   return base+'\n\nСтатус: '+STATUS_LABELS[row.business_status]+(row.quote_amount_minor?'\nПредложение: '+money(row.quote_amount_minor)+(row.quote_note?'\n'+row.quote_note.replace(/\s+/g,' '):''):'')+(row.customer_note?'\nВопрос клиента: '+row.customer_note.replace(/\s+/g,' '):'');
+   const review=row.review;
+   const reviewLine=reviewStateLabel[review?.state];
+   return base+'\n\nСтатус: '+STATUS_LABELS[row.business_status]+(row.quote_amount_minor?'\nПредложение: '+money(row.quote_amount_minor)+(row.quote_note?'\n'+row.quote_note.replace(/\s+/g,' '):''):'')+(row.customer_note?'\nВопрос клиента: '+row.customer_note.replace(/\s+/g,' '):'')+(reviewLine?'\n'+reviewLine+(review.sent_at?' · '+reviewDate.format(review.sent_at):''):'');
   }
 export function statusKeyboard(row,confirmCancel=false,fullText=managerText(row)){
  const data=action=>`vg:${row.id}:${row.business_version||0}:${action}`;
  const details=row.message_kind&&row.message_kind!=='text'&&compactCaption(fullText)!==fullText?[[{text:'Полная заявка',callback_data:data('details')}]]:[];
+ if(row.business_status==='accepted')return {inline_keyboard:[[{text:'Отметить выполненным',callback_data:data('fulfilled')}],...details]};
+ if(row.business_status==='fulfilled'){
+  const button=!row.review?{text:'Попросить отзыв',callback_data:data('review')}:
+   row.review.state==='failed'?{text:'Скопировать текст и ссылку',copy_text:{text:reviewText+'\n'+reviewUrl}}:null;
+  return {inline_keyboard:[...(button?[[button]]:[]),...details]};
+ }
  if(terminal.has(row.business_status))return {inline_keyboard:details};
  if(confirmCancel)return {inline_keyboard:[[{text:'Да, закрыть заявку',callback_data:data('cancelled')}],[{text:'Назад',callback_data:data('back')}]]};
  const buttons=row.business_status==='received'?[{text:'Взять на оценку',callback_data:data('processing')}]:[{text:row.business_status==='quoted'?'Изменить цену':'Назвать цену',callback_data:data('price')}];
@@ -105,6 +130,7 @@ export function createStatusService({telegram,stmt,fail}){
    try{const member=await telegram(env,'getChatMember',f);return ['creator','administrator'].includes(member.status)}catch{return false}
   }
   async function edit(env,row,message,confirmCancel=false){
+   if(row.business_status==='fulfilled')row={...row,review:await getReview(env,row.id)};
    const form=new FormData();form.set('chat_id',env.TELEGRAM_CHAT_ID);form.set('message_id',String(row.message_id));form.set('reply_markup',JSON.stringify(statusKeyboard(row,confirmCancel,managerText(row,message))));
    if(confirmCancel||(!message?.text&&!row.manager_text))return telegram(env,'editMessageReplyMarkup',form);
    if(row.message_kind&&row.message_kind!=='text'){form.set('caption',compactCaption(managerText(row,message)));return telegram(env,'editMessageCaption',form)}
@@ -128,6 +154,66 @@ export function createStatusService({telegram,stmt,fail}){
    const rows=(await stmt(env,"SELECT * FROM orders WHERE state='sent' AND message_kind='album' AND message_id IS NOT NULL AND NOT EXISTS(SELECT 1 FROM delivery_outbox WHERE order_id=orders.id AND id='received:'||orders.id||':sendMessage') ORDER BY created_at LIMIT 10").all()).results;
    for(const row of rows)await ensureMediaButtons(env,row);
   }
+  async function maintainReviewButtons(env){
+   const now=Date.now();
+   await stmt(env,`INSERT OR IGNORE INTO delivery_outbox(id,order_id,kind,payload,available_at,created_at)
+    SELECT 'completion-card:'||id,id,'edit','{}',?,? FROM orders
+    WHERE state='sent' AND business_status='accepted' AND buttons_version<2 AND message_id IS NOT NULL AND message_kind!='album'
+    AND NOT EXISTS(SELECT 1 FROM delivery_outbox WHERE id='completion-card:'||orders.id)
+    ORDER BY status_updated_at DESC LIMIT 10`,now,now).run();
+  }
+  function getReview(env,id){
+   return stmt(env,'SELECT state,sent_at FROM delivery_outbox WHERE id=?',reviewTaskId(id)).first();
+  }
+  async function promptReview(env,row,actorId){
+   const contact=await stmt(env,'SELECT first_name FROM customer_contacts WHERE user_id=?',row.user_id).first();
+   const cardName=/^Имя: ([^\n]+)$/m.exec(row.manager_text)?.[1];
+   const name=(JSON.parse(row.payload).name||contact?.first_name||(cardName==='Не указано'?'':cardName)||'').replace(/\s+/g,' ').trim();
+   const form=new FormData();
+   form.set('chat_id',env.TELEGRAM_CHAT_ID);
+   form.set('protect_content','true');
+   form.set('text',`Отправить приглашение к отзыву по заявке ${row.id}?\nПолучатель: ${name?name+' · ':''}Telegram ID ${row.user_id}\n\n${reviewText}`);
+   form.set('reply_parameters',JSON.stringify({message_id:row.message_id}));
+   form.set('reply_markup',JSON.stringify({inline_keyboard:[[reviewButton],[
+    {text:'Отправить клиенту',callback_data:'vr:send'},
+    {text:'Отмена',callback_data:'vr:cancel'}
+   ]]}));
+   const prompt=await telegram(env,'sendMessage',form);
+   await stmt(env,'INSERT INTO review_prompts(message_id,order_id,actor_id) VALUES(?,?,?)',prompt.message_id,row.id,String(actorId)).run();
+  }
+  async function reviewAction(env,q,action,answer){
+   const messageId=q.message.message_id,actor=String(q.from.id);
+   if(!Number.isSafeInteger(messageId)||messageId<=0){await answer('Подтверждение недоступно.');return}
+   const row=await stmt(env,`SELECT orders.* FROM review_prompts JOIN orders ON orders.id=review_prompts.order_id
+    WHERE review_prompts.message_id=? AND review_prompts.actor_id=?`,messageId,actor).first();
+   if(!row){await answer('Подтверждение доступно менеджеру, который открыл его.');return}
+   const review=await getReview(env,row.id);
+   if(review){await answer(reviewStateLabel[review.state]||'Приглашение уже обработано.');return}
+   if(action==='cancel'){
+    const result=await stmt(env,`DELETE FROM review_prompts WHERE message_id=? AND actor_id=?
+     AND NOT EXISTS(SELECT 1 FROM delivery_outbox WHERE id=?)`,messageId,actor,reviewTaskId(row.id)).run();
+    await answer(result.meta.changes?'Приглашение отменено.':'Приглашение уже обработано или отменено.');
+   }else{
+    const now=Date.now(),taskId=reviewTaskId(row.id);
+    const payload={chat_id:row.user_id,text:reviewText,reply_markup:{inline_keyboard:[[reviewButton]]}};
+    const changes=await env.DB.batch([
+     stmt(env,`INSERT OR IGNORE INTO delivery_outbox(id,order_id,kind,payload,available_at,created_at)
+      SELECT ?,orders.id,'sendMessage',?,?,? FROM review_prompts JOIN orders ON orders.id=review_prompts.order_id
+      WHERE review_prompts.message_id=? AND review_prompts.actor_id=? AND orders.state='sent' AND orders.business_status='fulfilled'`,
+      taskId,JSON.stringify(payload),now,now,messageId,actor),
+     stmt(env,`INSERT OR IGNORE INTO delivery_outbox(id,order_id,kind,payload,available_at,created_at)
+      SELECT 'review-queued:'||order_id,order_id,'edit','{}',?,? FROM delivery_outbox WHERE id=?`,now,now,taskId)
+    ]);
+    if(!changes[0].meta.changes){await answer('Приглашение уже обработано или отменено.');return}
+    await answer('Приглашение поставлено в очередь.');
+    await outbox.flush(env,row.id);
+    await outbox.flush(env,row.id);
+   }
+   const form=new FormData();
+   form.set('chat_id',env.TELEGRAM_CHAT_ID);form.set('message_id',String(messageId));
+   form.set('reply_markup',JSON.stringify({inline_keyboard:[]}));
+   try{await telegram(env,'editMessageReplyMarkup',form)}catch{}
+  }
   async function reply(env,message,text,markup){
    const f=new FormData();f.set('chat_id',env.TELEGRAM_CHAT_ID);f.set('text',text);f.set('reply_parameters',JSON.stringify({message_id:message.message_id}));
    if(markup)f.set('reply_markup',JSON.stringify(markup));
@@ -136,16 +222,60 @@ export function createStatusService({telegram,stmt,fail}){
     if(markup&&e.code==='DELIVERY'){f.delete('reply_markup');try{await telegram(env,'sendMessage',f)}catch{}}
    }
   }
+  async function promptPrice(env,row,user,retry=false){
+   const display=user.first_name||'Менеджер',f=new FormData();
+   const intro=retry?'не удалось распознать цену или комментарий':'укажите цену';
+   f.set('chat_id',env.TELEGRAM_CHAT_ID);
+   f.set('text',`${display}, ${intro} для заявки ${row.id}.\nВведите сумму в BYN, например 150 или 150,50. Можно добавить комментарий после суммы, до 600 символов.\nПример: 150 с погрузкой.`);
+   f.set('entities',JSON.stringify([{type:'text_mention',offset:0,length:display.length,user:{id:user.id,first_name:display,is_bot:false}}]));
+   f.set('reply_markup',JSON.stringify({force_reply:true,selective:true,input_field_placeholder:'150 или 150 с погрузкой'}));
+   const prompt=await telegram(env,'sendMessage',f);
+   await stmt(env,'INSERT INTO quote_prompts(message_id,order_id,expected_version,created_at) VALUES(?,?,?,?)',prompt.message_id,row.id,row.business_version,Date.now()).run();
+  }
   async function priceReply(env,message){
    if(String(message.chat?.id)!==String(env.TELEGRAM_CHAT_ID)||!message.reply_to_message||!Number.isSafeInteger(message.from?.id))return;
    const prompt=await stmt(env,'SELECT * FROM quote_prompts WHERE message_id=?',message.reply_to_message.message_id).first();
    if(!prompt||!await admin(env,message.from.id))return;
    if(await stmt(env,'SELECT event_id FROM order_status_events WHERE event_id=?','quote:'+message.message_id).first())return;
-   let row=await stmt(env,'SELECT * FROM orders WHERE id=?',prompt.order_id).first();
-   if(!row||row.business_version!==prompt.expected_version||!['processing','discussion','quoted'].includes(row.business_status)){await reply(env,message,'Предложение уже изменилось. Нажмите «Назвать цену» под актуальной заявкой.');return}
+   const row=await stmt(env,'SELECT * FROM orders WHERE id=?',prompt.order_id).first();
+   if(!canQuote(row)||row.business_version!==prompt.expected_version){await reply(env,message,'Заявка уже изменилась. Используйте кнопку цены на актуальной карточке.');return}
    const quote=parseQuote(message.text);
-   if(!quote){await reply(env,message,'Укажите сумму в BYN первой строкой, например 150. Следующими строками — что входит в стоимость и условия (до 600 символов). Ответьте ещё раз на сообщение с запросом цены.');return}
-   const eventId='quote:'+message.message_id,now=Date.now();
+   if(quote){
+    if(await publishQuote(env,row,quote,message.message_id,message.from.id))await quoteSaved(env,message);
+    return;
+   }
+   const draft=parseQuoteWithInlineNote(message.text);
+   if(!draft){await promptPrice(env,row,message.from,true);return}
+   await stmt(env,'INSERT OR IGNORE INTO quote_drafts(message_id,prompt_id,actor_id,amount,note) VALUES(?,?,?,?,?)',message.message_id,prompt.message_id,String(message.from.id),draft.amount,draft.note).run();
+   const f=new FormData();
+   f.set('chat_id',env.TELEGRAM_CHAT_ID);
+   f.set('text',`Проверьте предложение по заявке ${row.id}.\nЦена: ${money(draft.amount)}\nКомментарий: ${draft.note}`);
+   f.set('reply_parameters',JSON.stringify({message_id:message.message_id}));
+   f.set('reply_markup',JSON.stringify({inline_keyboard:[[
+    {text:'Отправить клиенту',callback_data:`vq:${message.message_id}:send`},
+    {text:'Исправить',callback_data:`vq:${message.message_id}:edit`}
+   ]]}));
+   await telegram(env,'sendMessage',f);
+  }
+  async function draftAction(env,q,sourceId,action,answer){
+   const draft=await stmt(env,`SELECT d.*,p.order_id,p.expected_version FROM quote_drafts d
+    JOIN quote_prompts p ON p.message_id=d.prompt_id WHERE d.message_id=?`,sourceId).first();
+   if(!draft||draft.actor_id!==String(q.from.id)){await answer('Подтвердить или исправить цену может автор сообщения.');return}
+   const row=await stmt(env,'SELECT * FROM orders WHERE id=?',draft.order_id).first();
+   if(!canQuote(row)||row.business_version!==draft.expected_version){await answer('Заявка уже изменилась. Откройте актуальную карточку.');return}
+   if(action==='edit'){
+    await stmt(env,'UPDATE quote_drafts SET discarded=1 WHERE message_id=?',sourceId).run();
+    try{await promptPrice(env,row,q.from);await answer('Введите цену ещё раз.')}catch{await answer('Не удалось открыть ввод цены. Попробуйте ещё раз.')}
+    return;
+   }
+   if(draft.discarded){await answer('Этот вариант отменён. Введите цену ещё раз.');return}
+   if(await publishQuote(env,row,draft,sourceId,q.from.id,true)){
+    await answer('Предложение сохранено.');
+    await quoteSaved(env,q.message,sourceId);
+   }else await answer('Предложение уже изменилось.');
+  }
+  async function publishQuote(env,row,quote,sourceId,actorId,fromDraft=false){
+   const eventId='quote:'+sourceId,now=Date.now();
    let notice=null;
    if(env.MINI_APP_URL||/^[A-Za-z0-9_]+$/.test(env.BOT_USERNAME||'')){
     const button={text:'Посмотреть предложение'};
@@ -154,15 +284,19 @@ export function createStatusService({telegram,stmt,fail}){
     notice={_quoteRevision:row.quote_revision+1,chat_id:row.user_id,text:`Предложение по заявке ${row.id} обновлено. Актуальная стоимость и условия – в приложении. Можно согласиться или задать вопрос.`,reply_markup:{inline_keyboard:[[button]]}};
    }
    const changes=await env.DB.batch([
-    stmt(env,"INSERT OR IGNORE INTO order_status_events(event_id,order_id,status,actor_id,changed_at) SELECT ?,id,'quoted',?,? FROM orders WHERE id=? AND business_version=?",eventId,String(message.from.id),now,row.id,row.business_version),
+    stmt(env,`INSERT OR IGNORE INTO order_status_events(event_id,order_id,status,actor_id,changed_at)
+     SELECT ?,id,'quoted',?,? FROM orders WHERE id=? AND business_version=?
+     AND (?=0 OR EXISTS(SELECT 1 FROM quote_drafts WHERE message_id=? AND discarded=0))`,eventId,String(actorId),now,row.id,row.business_version,Number(fromDraft),sourceId),
     stmt(env,"UPDATE orders SET business_status='quoted',business_version=business_version+1,status_updated_at=?,quote_amount_minor=?,quote_note=?,quote_revision=quote_revision+1,customer_note='' WHERE id=? AND business_version=? AND EXISTS(SELECT 1 FROM order_status_events WHERE event_id=? AND order_id=orders.id)",now,quote.amount,quote.note,row.id,row.business_version,eventId),
     outbox.enqueue(env,eventId,row.id,'edit',{},now),
     ...(notice?[outbox.enqueue(env,eventId,row.id,'sendMessage',notice,now)]:[])
    ]);
-   if(!changes[1].meta.changes)return;
-   row=await stmt(env,'SELECT * FROM orders WHERE id=?',row.id).first();
+   if(!changes[1].meta.changes)return false;
    await outbox.flush(env,row.id);
-   const delivered=await stmt(env,"SELECT state FROM delivery_outbox WHERE id=?",eventId+':sendMessage').first();
+   return true;
+  }
+  async function quoteSaved(env,message,sourceId=message.message_id){
+   const delivered=await stmt(env,"SELECT state FROM delivery_outbox WHERE id=?",`quote:${sourceId}:sendMessage`).first();
    await reply(env,message,delivered?.state==='sent'?'Предложение сохранено, клиенту отправлено уведомление. Ждём его решения.':'Предложение сохранено в приложении. Уведомление ожидает доставки или проверки; при необходимости свяжитесь с клиентом по телефону.');
   }
   async function decision(request,env,validateInitData){
@@ -183,7 +317,7 @@ export function createStatusService({telegram,stmt,fail}){
     const notice={chat_id:env.TELEGRAM_CHAT_ID,text:text+contact,reply_parameters:{message_id:row.message_id},reply_markup:{inline_keyboard:[[{text:'Написать клиенту в Telegram',url:username?'https://t.me/'+username:'tg://user?id='+row.user_id}]]}};
     const changes=await env.DB.batch([
      stmt(env,"INSERT OR IGNORE INTO order_status_events(event_id,order_id,status,actor_id,changed_at) SELECT ?,id,?,?,? FROM orders WHERE id=? AND user_id=? AND business_version=? AND business_status=?",eventId,target,String(user.id),now,row.id,String(user.id),data.version,row.business_status),
-     stmt(env,"UPDATE orders SET business_status=?,business_version=business_version+1,status_updated_at=?,customer_note=? WHERE id=? AND user_id=? AND business_version=? AND business_status=? AND EXISTS(SELECT 1 FROM order_status_events WHERE event_id=? AND order_id=orders.id AND status=?)",target,now,note,row.id,String(user.id),data.version,row.business_status,eventId,target),
+     stmt(env,"UPDATE orders SET business_status=?,business_version=business_version+1,status_updated_at=?,customer_note=?,buttons_version=CASE WHEN ?='accepted' THEN 2 ELSE buttons_version END WHERE id=? AND user_id=? AND business_version=? AND business_status=? AND EXISTS(SELECT 1 FROM order_status_events WHERE event_id=? AND order_id=orders.id AND status=?)",target,now,note,target,row.id,String(user.id),data.version,row.business_status,eventId,target),
      outbox.enqueue(env,eventId,row.id,'edit',{},now),
      outbox.enqueue(env,eventId,row.id,'sendMessage',notice,now)
     ]);
@@ -245,15 +379,19 @@ export function createStatusService({telegram,stmt,fail}){
     if(typeof q.id!=='string'||q.id.length>128)return {ok:true};
     const answer=async text=>{const f=new FormData();f.set('callback_query_id',q.id);f.set('text',text);try{await telegram(env,'answerCallbackQuery',f)}catch{}};
     if(String(q.message?.chat?.id)!==String(env.TELEGRAM_CHAT_ID)){await answer('Управление доступно только в группе заказов.');return {ok:true}}
-    const match=/^vg:(VG-[A-F0-9]{12}):(\d{1,8}):(processing|confirmed|completed|price|ask_cancel|cancelled|back|details)$/.exec(q.data||'');
-    if(!match){await answer('Кнопка недоступна.');return {ok:true}}
+    const match=/^vg:(VG-[A-F0-9]{12}):(\d{1,8}):(processing|confirmed|completed|fulfilled|review|price|ask_cancel|cancelled|back|details)$/.exec(q.data||'');
+    const draft=/^vq:([1-9]\d{0,14}):(send|edit)$/.exec(q.data||'');
+    const review=/^vr:(send|cancel)$/.exec(q.data||'');
+    if(!match&&!draft&&!review){await answer('Кнопка недоступна.');return {ok:true}}
     if(!Number.isSafeInteger(q.from?.id)){await answer('Не удалось проверить пользователя.');return {ok:true}}
     if(!await admin(env,q.from.id)){await answer('Изменять статус могут только администраторы группы.');return {ok:true}}
+    if(draft){await draftAction(env,q,Number(draft[1]),draft[2],answer);return {ok:true}}
+    if(review){await reviewAction(env,q,review[1],answer);return {ok:true}}
     const [,id,versionString,action]=match,version=Number(versionString);
     let row=await stmt(env,'SELECT * FROM orders WHERE id=?',id).first();
     if(!row||row.message_id!==q.message.message_id){await answer('Заявка не найдена.');return {ok:true}}
     if(!row.manager_text&&typeof q.message.text==='string'){
-      row.manager_text=q.message.text.replace(/\n\nСтатус: [^\n]*$/,'');
+      row.manager_text=q.message.text.replace(/\n\nСтатус: [\s\S]*$/,'');
       await stmt(env,"UPDATE orders SET manager_text=? WHERE id=? AND manager_text=''",row.manager_text,row.id).run();
     }
     if(row.state!=='sent'){await answer('Заявка ещё доставляется. Попробуйте чуть позже.');return {ok:true}}
@@ -262,25 +400,29 @@ export function createStatusService({telegram,stmt,fail}){
       await answer('Статус уже обновлён: '+STATUS_LABELS[row.business_status]);return {ok:true};
     }
     if(action==='details'){await reply(env,q.message,managerText(row,q.message));await answer('');return {ok:true}}
+    if(action==='review'){
+     if(row.business_status!=='fulfilled'){await answer('Сначала отметьте заказ выполненным.');return {ok:true}}
+     const existing=await getReview(env,row.id);
+     if(existing){await answer(reviewStateLabel[existing.state]||'Приглашение уже обработано.');return {ok:true}}
+     try{await promptReview(env,row,q.from.id);await answer('Проверьте сообщение перед отправкой.')}catch{await answer('Не удалось открыть подтверждение. Попробуйте ещё раз.')}
+     return {ok:true};
+    }
     if(action==='price'){
-     if(!['processing','discussion','quoted'].includes(row.business_status)){await answer('Сначала возьмите заявку на оценку.');return {ok:true}}
-     const display=q.from.first_name||'Менеджер',f=new FormData();
-     f.set('chat_id',env.TELEGRAM_CHAT_ID);f.set('text',`${display}, укажите цену для заявки ${row.id}.\nПервая строка — сумма в BYN, например 150.\nСледующие строки — что включено и условия. Это предложение, а не подтверждённый заказ.`);
-     f.set('entities',JSON.stringify([{type:'text_mention',offset:0,length:display.length,user:{id:q.from.id,first_name:display,is_bot:false}}]));
-     f.set('reply_markup',JSON.stringify({force_reply:true,selective:true,input_field_placeholder:'150 — сумма первой строкой'}));
-     try{const prompt=await telegram(env,'sendMessage',f);await stmt(env,'INSERT OR REPLACE INTO quote_prompts(message_id,order_id,expected_version,created_at) VALUES(?,?,?,?)',prompt.message_id,row.id,row.business_version,Date.now()).run();await answer('Ответьте на сообщение бота с запросом цены.')}catch{await answer('Не удалось открыть ввод цены. Попробуйте ещё раз.')}
+     if(!canQuote(row)){await answer('Сначала возьмите заявку на оценку.');return {ok:true}}
+     try{await promptPrice(env,row,q.from);await answer('Ответьте на сообщение бота с запросом цены.')}catch{await answer('Не удалось открыть ввод цены. Попробуйте ещё раз.')}
      return {ok:true};
     }
     if(['ask_cancel','back'].includes(action)){
       try{await edit(env,row,q.message,action==='ask_cancel');await answer(action==='ask_cancel'?'Подтвердите отмену заявки.':'')}catch{await answer('Не удалось обновить кнопки. Повторите попытку.')}
       return {ok:true};
     }
-    const permitted=(action==='processing'&&row.business_status==='received')||(action==='cancelled'&&!terminal.has(row.business_status));
+    const permitted=(action==='processing'&&row.business_status==='received')||
+      (action==='fulfilled'&&row.business_status==='accepted')||(action==='cancelled'&&!terminal.has(row.business_status));
     if(!permitted){await answer('Этот переход недоступен: сначала назовите цену, затем дождитесь решения клиента.');return {ok:true}}
     const now=Date.now();
     await env.DB.batch([
       stmt(env,'INSERT OR IGNORE INTO order_status_events(event_id,order_id,status,actor_id,changed_at) SELECT ?,id,?,?,? FROM orders WHERE id=? AND business_version=? AND business_status=? AND state=\'sent\'',q.id,action,String(q.from.id),now,id,version,row.business_status),
-      stmt(env,"UPDATE orders SET business_status=?,business_version=business_version+1,status_updated_at=?,customer_visibility=CASE WHEN customer_visibility='deleted' THEN 'deleted' WHEN ?='cancelled' THEN 'archived' ELSE customer_visibility END WHERE id=? AND business_version=? AND business_status=? AND EXISTS(SELECT 1 FROM order_status_events WHERE event_id=? AND order_id=orders.id AND status=?)",action,now,action,id,version,row.business_status,q.id,action),
+      stmt(env,"UPDATE orders SET business_status=?,business_version=business_version+1,status_updated_at=?,customer_visibility=CASE WHEN customer_visibility='deleted' THEN 'deleted' WHEN ? IN ('cancelled','fulfilled') THEN 'archived' ELSE customer_visibility END WHERE id=? AND business_version=? AND business_status=? AND EXISTS(SELECT 1 FROM order_status_events WHERE event_id=? AND order_id=orders.id AND status=?)",action,now,action,id,version,row.business_status,q.id,action),
       outbox.enqueue(env,q.id,id,'edit',{},now)
     ]);
     row=await stmt(env,'SELECT * FROM orders WHERE id=?',id).first();
@@ -351,5 +493,5 @@ export function createStatusService({telegram,stmt,fail}){
     const info=await setupTelegram('getWebhookInfo',new FormData());
     return {ok:true,webhook:info.url===url,pending:info.pending_update_count||0};
   }
-  return {ensureMediaButtons,maintainMediaButtons,received,list,get,contact,saveContact,decision,organize,webhook,setup,flushOutbox:outbox.flush,maintainBotChat:botChat.maintenance};
+  return {ensureMediaButtons,maintainMediaButtons,maintainReviewButtons,received,list,get,contact,saveContact,decision,organize,webhook,setup,flushOutbox:outbox.flush,maintainBotChat:botChat.maintenance};
 }
